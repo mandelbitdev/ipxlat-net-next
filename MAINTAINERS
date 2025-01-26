@@ -23939,6 +23939,12 @@ N:	sifive
 K:	fu[57]40
 K:	[^@]sifive
 
+SIIT DRIVER:
+M:	Antonio Quartulli <antonio@mandelbit.com>
+L:	ipv6@lists.monostack.org
+S:	Maintained
+F:	drivers/net/siit/
+
 SILEAD TOUCHSCREEN DRIVER
 M:	Hans de Goede <hansg@kernel.org>
 L:	linux-input@vger.kernel.org
