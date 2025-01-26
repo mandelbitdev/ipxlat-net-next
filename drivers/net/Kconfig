@@ -117,6 +117,15 @@ config OVPN
 	  This module enhances the performance of the OpenVPN userspace software
 	  by offloading the data channel processing to kernelspace.
 
+config JOOLIF
+	tristate "Virtual driver implementing IPv6 SIIT"
+	depends on NET && INET && IPV6
+	help
+	  Virtual device driver implementing SIIT.
+	  It can be used in conjunction with NAT44 and NAT66 to implement
+	  a full stateful NAT64 mechanism.
+	  This is something you may want if you are trying to go IPv6-only.
+
 config EQUALIZER
 	tristate "EQL (serial line load balancing) support"
 	help
