@@ -30,8 +30,6 @@ struct joolif_priv {
 #define JCMD_LI6M		(SIOCDEVPRIVATE + 4)
 #define JCMD_AUCZ		(SIOCDEVPRIVATE + 5)
 
-struct net_device *joolif_dev;
-
 static struct jool_globals cfg = {
 	/* 64:ff9b::/96 */
 	.pool6.addr.s6_addr32[0] = htonl(0x0064ff9b),
