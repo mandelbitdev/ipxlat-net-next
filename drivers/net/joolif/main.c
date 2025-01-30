@@ -5,7 +5,6 @@
  *  Copyright (C) 2025- Antonio Quartulli <antonio@mandelbit.com>
  */
 
-#include <linux/etherdevice.h>
 #include <linux/module.h>
 #include <linux/ioctl.h>
 #include <linux/version.h>
@@ -78,8 +77,6 @@ static int joolif_start_xmit(struct sk_buff *in, struct net_device *dev)
 	struct xlation state;
 
 	log_debug("Received a packet.");
-
-	skb_pull(in, ETH_HLEN); /* TODO check len >= ETH_HLEN first? */
 
 	memset(&state, 0, sizeof(state));
 	state.ns = dev_net(dev);
@@ -212,8 +209,7 @@ static void joolif_setup(struct net_device *dev)
 				 NETIF_F_HW_CSUM | NETIF_F_RXCSUM | \
 				 NETIF_F_HIGHDMA | NETIF_F_GSO_SOFTWARE;
 
-	ether_setup(dev);
-
+	dev->type = ARPHRD_NONE;
 //	dev->watchdog_timeo = 5; TODO ?
 	dev->flags |= IFF_NOARP;
 	dev->priv_flags |= IFF_NO_QUEUE;
@@ -227,36 +223,11 @@ static void joolif_setup(struct net_device *dev)
 	dev->needs_free_netdev = true;
 //	dev->priv_destructor = ;
 //	dev->pcpu_stat_type = NETDEV_PCPU_STAT_NONE; /* Newer kernels only. */
-	dev->max_mtu = ETH_MAX_MTU;
+	dev->max_mtu = IP_MAX_MTU;
+	dev->min_mtu = IPV6_MIN_MTU;
+	dev->mtu = ETH_DATA_LEN;
 
 //	netif_set_tso_max_size(dev, GSO_MAX_SIZE);
-}
-
-/*
- * Inherited from veth. Seems reasonable.
- */
-static int is_valid_siit_mtu(int mtu)
-{
-	return mtu >= ETH_MIN_MTU && mtu <= ETH_MAX_MTU;
-}
-
-/*
- * Inherited from veth. Seems reasonable.
- */
-static int siit_validate(struct nlattr *tb[], struct nlattr *data[],
-			 struct netlink_ext_ack *extack)
-{
-	if (tb[IFLA_ADDRESS]) {
-		if (nla_len(tb[IFLA_ADDRESS]) != ETH_ALEN)
-			return -EINVAL;
-		if (!is_valid_ether_addr(nla_data(tb[IFLA_ADDRESS])))
-			return -EADDRNOTAVAIL;
-	}
-	if (tb[IFLA_MTU]) {
-		if (!is_valid_siit_mtu(nla_get_u32(tb[IFLA_MTU])))
-			return -EINVAL;
-	}
-	return 0;
 }
 
 /*
@@ -318,9 +289,6 @@ static int siit_newlink(struct net *src_net, struct net_device *dev,
 {
 	int err;
 
-	if (tb[IFLA_ADDRESS] == NULL)
-		eth_hw_addr_random(dev);
-
 	if (tb[IFLA_IFNAME])
 		NLA_STRCPY(dev->name, tb[IFLA_IFNAME], IFNAMSIZ);
 	else
@@ -367,7 +335,6 @@ static struct rtnl_link_ops siit_link_ops = {
 	.kind			= DRV_NAME,
 	.priv_size		= sizeof(struct joolif_priv),
 	.setup			= joolif_setup,
-	.validate		= siit_validate,
 	.newlink		= siit_newlink,
 	.dellink		= siit_dellink,
 
