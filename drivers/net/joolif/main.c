@@ -215,22 +215,13 @@ static void joolif_setup(struct net_device *dev)
 	ether_setup(dev);
 
 //	dev->watchdog_timeo = 5; TODO ?
-	dev->flags    |= IFF_NOARP | IFF_DEBUG;
-	dev->flags    &= ~IFF_MULTICAST;
+	dev->flags |= IFF_NOARP;
+	dev->priv_flags |= IFF_NO_QUEUE;
 
 	dev->lltx = true;
 	dev->features |= feat;
 	dev->hw_features |= feat;
 	dev->hw_enc_features = feat;
-
-	/* pskb_may_pull() crashes on shared packets.
-	 * https://elixir.bootlin.com/linux/latest/source/net/core/skbuff.c#L2091
-	 * There might be other functions that reject shareds. */
-	dev->priv_flags &= ~IFF_TX_SKB_SHARING;
-	/* Jool doesn't care about the L2 address, so whatever I guess. */
-	dev->priv_flags |= IFF_LIVE_ADDR_CHANGE;
-	/* Is this relevant? Packet order matters nothing to SIIT. */
-	dev->priv_flags |= IFF_NO_QUEUE;
 
 	dev->netdev_ops = &joolif_netdev_ops;
 	dev->needs_free_netdev = true;
