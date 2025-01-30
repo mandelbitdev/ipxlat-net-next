@@ -203,6 +203,10 @@ static const struct net_device_ops joolif_netdev_ops = {
 	.ndo_siocdevprivate	= joolif_siocdevprivate,
 };
 
+static const struct device_type joolif_type = {
+	.name = DRV_NAME,
+};
+
 static void joolif_setup(struct net_device *dev)
 {
 	netdev_features_t feat = NETIF_F_SG | NETIF_F_FRAGLIST | \
@@ -210,7 +214,6 @@ static void joolif_setup(struct net_device *dev)
 				 NETIF_F_HIGHDMA | NETIF_F_GSO_SOFTWARE;
 
 	dev->type = ARPHRD_NONE;
-//	dev->watchdog_timeo = 5; TODO ?
 	dev->flags |= IFF_NOARP;
 	dev->priv_flags |= IFF_NO_QUEUE;
 
@@ -221,13 +224,12 @@ static void joolif_setup(struct net_device *dev)
 
 	dev->netdev_ops = &joolif_netdev_ops;
 	dev->needs_free_netdev = true;
-//	dev->priv_destructor = ;
-//	dev->pcpu_stat_type = NETDEV_PCPU_STAT_NONE; /* Newer kernels only. */
+	dev->pcpu_stat_type = NETDEV_PCPU_STAT_TSTATS;
 	dev->max_mtu = IP_MAX_MTU;
 	dev->min_mtu = IPV6_MIN_MTU;
 	dev->mtu = ETH_DATA_LEN;
 
-//	netif_set_tso_max_size(dev, GSO_MAX_SIZE);
+	SET_NETDEV_DEVTYPE(dev, &joolif_type);
 }
 
 /*
