@@ -247,7 +247,7 @@ static void joolif_setup(struct net_device *dev)
  *	dev->real_num_rx_queues: 6
  *
  * If numtxqueues/numrxqueues default, rtnl_create_link() uses
- * siit_get_num_queues() to set num_tx_queues/num_rx_queues. In my quad core,
+ * joolif_get_num_queues() to set num_tx_queues/num_rx_queues. In my quad core,
  * this results in
  *
  *	dev->num_tx_queues: 4
@@ -259,7 +259,7 @@ static void joolif_setup(struct net_device *dev)
  *
  * This looks like nonsense.
  */
-static int siit_init_queues(struct net_device *dev, struct nlattr *tb[])
+static int joolif_init_queues(struct net_device *dev, struct nlattr *tb[])
 {
 	int err;
 
@@ -287,8 +287,7 @@ static int siit_init_queues(struct net_device *dev, struct nlattr *tb[])
 /*
  * Simplified version of veth's newlink.
  */
-
-static int siit_newlink(struct net_device *dev,
+static int joolif_newlink(struct net_device *dev,
 			struct rtnl_newlink_params *params,
 			struct netlink_ext_ack *extack)
 {
@@ -306,7 +305,7 @@ static int siit_newlink(struct net_device *dev,
 
 	pr_info("Added device '%s'.\n", dev->name);
 
-	err = siit_init_queues(dev, tb);
+	err = joolif_init_queues(dev, tb);
 	if (err) {
 		unregister_netdevice(dev);
 		return err;
@@ -322,7 +321,7 @@ static int siit_newlink(struct net_device *dev,
  * TODO If you don't add anything, probably delete this function on pr_info()
  * purge day.
  */
-static void siit_dellink(struct net_device *dev, struct list_head *head)
+static void joolif_dellink(struct net_device *dev, struct list_head *head)
 {
 	pr_info("Removing device '%s'.\n", dev->name);
 	unregister_netdevice_queue(dev, head);
@@ -331,18 +330,18 @@ static void siit_dellink(struct net_device *dev, struct list_head *head)
 /*
  * Inherited from veth. Seems like a reasonable implementation.
  */
-static unsigned int siit_get_num_queues(void)
+static unsigned int joolif_get_num_queues(void)
 {
 	int queues = num_possible_cpus();
 	return (queues > 4096) ? 4096 : queues;
 }
 
-static struct rtnl_link_ops siit_link_ops = {
+static struct rtnl_link_ops joolif_link_ops = {
 	.kind			= DRV_NAME,
 	.priv_size		= sizeof(struct joolif_priv),
 	.setup			= joolif_setup,
-	.newlink		= siit_newlink,
-	.dellink		= siit_dellink,
+	.newlink		= joolif_newlink,
+	.dellink		= joolif_dellink,
 
 	/* nlargs not needed for now, so .policy and .maxtype excluded */
 
@@ -352,18 +351,18 @@ static struct rtnl_link_ops siit_link_ops = {
 	 * and has no meaning in SIIT anyway.
 	 */
 
-	.get_num_tx_queues	= siit_get_num_queues,
-	.get_num_rx_queues	= siit_get_num_queues,
+	.get_num_tx_queues	= joolif_get_num_queues,
+	.get_num_rx_queues	= joolif_get_num_queues,
 };
 
 static int joolif_init(void)
 {
-	return rtnl_link_register(&siit_link_ops);
+	return rtnl_link_register(&joolif_link_ops);
 }
 
 static void joolif_exit(void)
 {
-	rtnl_link_unregister(&siit_link_ops);
+	rtnl_link_unregister(&joolif_link_ops);
 }
 
 module_init(joolif_init);
