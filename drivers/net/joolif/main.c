@@ -206,28 +206,22 @@ static const struct net_device_ops joolif_netdev_ops = {
 	.ndo_siocdevprivate	= joolif_siocdevprivate,
 };
 
-/*
- * Inherited from veth.
- *
- * Netfilter/iptables Jool decently translates GSO, frag_list and checksums.
- * However, I don't yet know what these flags do nor exactly what they expect us
- * to do, so I decided to leave them out for now.
- */
-#define SIIT_FEATURES (NETIF_F_SG | NETIF_F_FRAGLIST | NETIF_F_HW_CSUM | \
-		       NETIF_F_RXCSUM | /* NETIF_F_HIGHDMA | ? */ \
-		       NETIF_F_GSO_SOFTWARE | NETIF_F_GSO_ENCAP_ALL)
-
-/*
- * Mixed from snull and veth.
- */
-static void siit_setup(struct net_device *dev)
+static void joolif_setup(struct net_device *dev)
 {
+	netdev_features_t feat = NETIF_F_SG | NETIF_F_FRAGLIST | \
+				 NETIF_F_HW_CSUM | NETIF_F_RXCSUM | \
+				 NETIF_F_HIGHDMA | NETIF_F_GSO_SOFTWARE;
+
 	ether_setup(dev);
 
 //	dev->watchdog_timeo = 5; TODO ?
 	dev->flags    |= IFF_NOARP | IFF_DEBUG;
 	dev->flags    &= ~IFF_MULTICAST;
-	dev->features |= NETIF_F_SG | NETIF_F_FRAGLIST |  NETIF_F_HW_CSUM;
+
+	dev->lltx = true;
+	dev->features |= feat;
+	dev->hw_features |= feat;
+	dev->hw_enc_features = feat;
 
 	/* pskb_may_pull() crashes on shared packets.
 	 * https://elixir.bootlin.com/linux/latest/source/net/core/skbuff.c#L2091
@@ -239,15 +233,11 @@ static void siit_setup(struct net_device *dev)
 	dev->priv_flags |= IFF_NO_QUEUE;
 
 	dev->netdev_ops = &joolif_netdev_ops;
-//	dev->features |= SIIT_FEATURES;
 	dev->needs_free_netdev = true;
 //	dev->priv_destructor = ;
 //	dev->pcpu_stat_type = NETDEV_PCPU_STAT_NONE; /* Newer kernels only. */
 	dev->max_mtu = ETH_MAX_MTU;
 
-//	dev->hw_features = SIIT_FEATURES;
-//	dev->hw_enc_features = SIIT_FEATURES;
-//	dev->mpls_features = NETIF_F_HW_CSUM | NETIF_F_GSO_SOFTWARE;
 //	netif_set_tso_max_size(dev, GSO_MAX_SIZE);
 }
 
@@ -385,7 +375,7 @@ static unsigned int siit_get_num_queues(void)
 static struct rtnl_link_ops siit_link_ops = {
 	.kind			= DRV_NAME,
 	.priv_size		= sizeof(struct joolif_priv),
-	.setup			= siit_setup,
+	.setup			= joolif_setup,
 	.validate		= siit_validate,
 	.newlink		= siit_newlink,
 	.dellink		= siit_dellink,
