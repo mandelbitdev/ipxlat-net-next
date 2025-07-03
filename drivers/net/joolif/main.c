@@ -285,10 +285,12 @@ static int siit_init_queues(struct net_device *dev, struct nlattr *tb[])
 /*
  * Simplified version of veth's newlink.
  */
-static int siit_newlink(struct net *src_net, struct net_device *dev,
-			struct nlattr *tb[], struct nlattr *data[],
+
+static int siit_newlink(struct net_device *dev,
+			struct rtnl_newlink_params *params,
 			struct netlink_ext_ack *extack)
 {
+	struct nlattr **tb = params->tb;
 	int err;
 
 	if (tb[IFLA_IFNAME])
