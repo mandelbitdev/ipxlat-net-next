@@ -226,7 +226,8 @@ static void joolif_setup(struct net_device *dev)
 	dev->netdev_ops = &joolif_netdev_ops;
 	dev->needs_free_netdev = true;
 	dev->pcpu_stat_type = NETDEV_PCPU_STAT_TSTATS;
-	dev->max_mtu = IP_MAX_MTU;
+	dev->max_mtu = IP_MAX_MTU -
+		sizeof(struct ipv6hdr) - sizeof(struct iphdr);
 	dev->min_mtu = IPV6_MIN_MTU;
 	dev->mtu = ETH_DATA_LEN;
 
