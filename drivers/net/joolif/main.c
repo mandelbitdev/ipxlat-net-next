@@ -14,6 +14,7 @@
 #include "translation_state.h"
 
 MODULE_AUTHOR("Alberto Leiva Popper, Antonio Quartulli");
+MODULE_DESCRIPTION("SIIT hairpin translation device (RFC 7915)");
 MODULE_LICENSE("GPL v2");
 
 #define DRV_NAME "joolif"
