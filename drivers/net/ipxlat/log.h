@@ -10,7 +10,7 @@
 
 #include <linux/printk.h>
 
-#define log_debug(text, ...) pr_info("joolif: " text "\n", ##__VA_ARGS__)
+#define log_debug(text, ...) pr_info("ipxlat: " text "\n", ##__VA_ARGS__)
 
 /*
  * These should not be committed, so if you see one in uploaded code, delete it.

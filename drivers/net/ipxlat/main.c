@@ -14,13 +14,13 @@
 #include "translation_state.h"
 
 MODULE_AUTHOR("Alberto Leiva Popper, Antonio Quartulli");
-MODULE_DESCRIPTION("SIIT hairpin translation device (RFC 7915)");
+MODULE_DESCRIPTION("IPv6-IPv4 packet translation virtual device (RFC 7915)");
 MODULE_LICENSE("GPL v2");
 
-#define DRV_NAME "joolif"
+#define DRV_NAME "ipxlat"
 
 /* Inherited from veth, unused placeholder for now. */
-struct joolif_priv {
+struct ipxlat_priv {
 	atomic64_t		dropped;
 };
 
@@ -48,13 +48,13 @@ static struct jool_globals cfg = {
 	.compute_udp_csum_zero = false,
 };
 
-static int joolif_open(struct net_device *dev)
+static int ipxlat_open(struct net_device *dev)
 {
 	netif_start_queue(dev);
 	return 0;
 }
 
-static int joolif_stop(struct net_device *dev)
+static int ipxlat_stop(struct net_device *dev)
 {
 	netif_stop_queue(dev);
 	return 0;
@@ -73,7 +73,7 @@ static void send_packet(struct sk_buff *skb, struct net_device *dev)
 	}
 }
 
-static int joolif_start_xmit(struct sk_buff *in, struct net_device *dev)
+static int ipxlat_start_xmit(struct sk_buff *in, struct net_device *dev)
 {
 	struct xlation state;
 
@@ -126,7 +126,7 @@ static int prefix6_validate(const struct ipv6_prefix *prefix)
 	return 0;
 }
 
-static int joolif_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
+static int ipxlat_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
 				 void __user *data, int cmd)
 {
 	union {
@@ -197,18 +197,18 @@ efault:
 	return -EFAULT;
 }
 
-static const struct net_device_ops joolif_netdev_ops = {
-	.ndo_open		= joolif_open,
-	.ndo_stop		= joolif_stop,
-	.ndo_start_xmit		= joolif_start_xmit,
-	.ndo_siocdevprivate	= joolif_siocdevprivate,
+static const struct net_device_ops ipxlat_netdev_ops = {
+	.ndo_open		= ipxlat_open,
+	.ndo_stop		= ipxlat_stop,
+	.ndo_start_xmit		= ipxlat_start_xmit,
+	.ndo_siocdevprivate	= ipxlat_siocdevprivate,
 };
 
-static const struct device_type joolif_type = {
+static const struct device_type ipxlat_type = {
 	.name = DRV_NAME,
 };
 
-static void joolif_setup(struct net_device *dev)
+static void ipxlat_setup(struct net_device *dev)
 {
 	netdev_features_t feat = NETIF_F_SG | NETIF_F_FRAGLIST | \
 				 NETIF_F_HW_CSUM | NETIF_F_RXCSUM | \
@@ -223,7 +223,7 @@ static void joolif_setup(struct net_device *dev)
 	dev->hw_features |= feat;
 	dev->hw_enc_features = feat;
 
-	dev->netdev_ops = &joolif_netdev_ops;
+	dev->netdev_ops = &ipxlat_netdev_ops;
 	dev->needs_free_netdev = true;
 	dev->pcpu_stat_type = NETDEV_PCPU_STAT_TSTATS;
 	dev->max_mtu = IP_MAX_MTU -
@@ -231,7 +231,7 @@ static void joolif_setup(struct net_device *dev)
 	dev->min_mtu = IPV6_MIN_MTU;
 	dev->mtu = ETH_DATA_LEN;
 
-	SET_NETDEV_DEVTYPE(dev, &joolif_type);
+	SET_NETDEV_DEVTYPE(dev, &ipxlat_type);
 }
 
 /*
@@ -247,7 +247,7 @@ static void joolif_setup(struct net_device *dev)
  *	dev->real_num_rx_queues: 6
  *
  * If numtxqueues/numrxqueues default, rtnl_create_link() uses
- * joolif_get_num_queues() to set num_tx_queues/num_rx_queues. In my quad core,
+ * ipxlat_get_num_queues() to set num_tx_queues/num_rx_queues. In my quad core,
  * this results in
  *
  *	dev->num_tx_queues: 4
@@ -259,7 +259,7 @@ static void joolif_setup(struct net_device *dev)
  *
  * This looks like nonsense.
  */
-static int joolif_init_queues(struct net_device *dev, struct nlattr *tb[])
+static int ipxlat_init_queues(struct net_device *dev, struct nlattr *tb[])
 {
 	int err;
 
@@ -287,7 +287,7 @@ static int joolif_init_queues(struct net_device *dev, struct nlattr *tb[])
 /*
  * Simplified version of veth's newlink.
  */
-static int joolif_newlink(struct net_device *dev,
+static int ipxlat_newlink(struct net_device *dev,
 			struct rtnl_newlink_params *params,
 			struct netlink_ext_ack *extack)
 {
@@ -305,7 +305,7 @@ static int joolif_newlink(struct net_device *dev,
 
 	pr_info("Added device '%s'.\n", dev->name);
 
-	err = joolif_init_queues(dev, tb);
+	err = ipxlat_init_queues(dev, tb);
 	if (err) {
 		unregister_netdevice(dev);
 		return err;
@@ -321,7 +321,7 @@ static int joolif_newlink(struct net_device *dev,
  * TODO If you don't add anything, probably delete this function on pr_info()
  * purge day.
  */
-static void joolif_dellink(struct net_device *dev, struct list_head *head)
+static void ipxlat_dellink(struct net_device *dev, struct list_head *head)
 {
 	pr_info("Removing device '%s'.\n", dev->name);
 	unregister_netdevice_queue(dev, head);
@@ -330,18 +330,18 @@ static void joolif_dellink(struct net_device *dev, struct list_head *head)
 /*
  * Inherited from veth. Seems like a reasonable implementation.
  */
-static unsigned int joolif_get_num_queues(void)
+static unsigned int ipxlat_get_num_queues(void)
 {
 	int queues = num_possible_cpus();
 	return (queues > 4096) ? 4096 : queues;
 }
 
-static struct rtnl_link_ops joolif_link_ops = {
+static struct rtnl_link_ops ipxlat_link_ops = {
 	.kind			= DRV_NAME,
-	.priv_size		= sizeof(struct joolif_priv),
-	.setup			= joolif_setup,
-	.newlink		= joolif_newlink,
-	.dellink		= joolif_dellink,
+	.priv_size		= sizeof(struct ipxlat_priv),
+	.setup			= ipxlat_setup,
+	.newlink		= ipxlat_newlink,
+	.dellink		= ipxlat_dellink,
 
 	/* nlargs not needed for now, so .policy and .maxtype excluded */
 
@@ -351,19 +351,19 @@ static struct rtnl_link_ops joolif_link_ops = {
 	 * and has no meaning in SIIT anyway.
 	 */
 
-	.get_num_tx_queues	= joolif_get_num_queues,
-	.get_num_rx_queues	= joolif_get_num_queues,
+	.get_num_tx_queues	= ipxlat_get_num_queues,
+	.get_num_rx_queues	= ipxlat_get_num_queues,
 };
 
-static int joolif_init(void)
+static int ipxlat_init(void)
 {
-	return rtnl_link_register(&joolif_link_ops);
+	return rtnl_link_register(&ipxlat_link_ops);
 }
 
-static void joolif_exit(void)
+static void ipxlat_exit(void)
 {
-	rtnl_link_unregister(&joolif_link_ops);
+	rtnl_link_unregister(&ipxlat_link_ops);
 }
 
-module_init(joolif_init);
-module_exit(joolif_exit);
+module_init(ipxlat_init);
+module_exit(ipxlat_exit);
