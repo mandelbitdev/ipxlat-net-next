@@ -117,8 +117,8 @@ config OVPN
 	  This module enhances the performance of the OpenVPN userspace software
 	  by offloading the data channel processing to kernelspace.
 
-config JOOLIF
-	tristate "Virtual driver implementing IPv6 SIIT"
+config IPXLAT
+	tristate "IPv6-IPv4 packet translation virtual device"
 	depends on NET && INET && IPV6
 	help
 	  Virtual device driver implementing SIIT.
