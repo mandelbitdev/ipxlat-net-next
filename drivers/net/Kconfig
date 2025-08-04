@@ -121,10 +121,10 @@ config IPXLAT
 	tristate "IPv6-IPv4 packet translation virtual device"
 	depends on NET && INET && IPV6
 	help
-	  Virtual device driver implementing SIIT.
-	  It can be used in conjunction with NAT44 and NAT66 to implement
-	  a full stateful NAT64 mechanism.
-	  This is something you may want if you are trying to go IPv6-only.
+	  Virtual device driver implementing Stateless IP/ICMP Translation
+	  (RFC 6145).  Can be used to build IPv6-mostly or 464XLAT network
+	  architectures when used in conjunction with sutiably configured
+	  Netfilter NAT44 and NAT66.
 
 config EQUALIZER
 	tristate "EQL (serial line load balancing) support"
