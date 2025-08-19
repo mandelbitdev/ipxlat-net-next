@@ -37,9 +37,6 @@ static struct jool_globals cfg = {
 
 	.pool6791v4.s_addr = htonl(INADDR_DUMMY),
 
-	.reset_traffic_class = false,
-	.reset_tos = false,
-	.new_tos = 0,
 	.lowest_ipv6_mtu = 1280,
 	.plateaus.values = {
 		65535, 32000, 17914, 8166, 4352, 2002, 1492, 1006, 508, 296, 68
