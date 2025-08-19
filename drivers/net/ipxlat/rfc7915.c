@@ -2094,11 +2094,6 @@ static int ttp64_ipv4_external(struct xlation *state)
 
 	hdr6 = ipv6_hdr(state->in);
 
-	if (hdr6->hop_limit <= 1) {
-		log_debug("Packet's hop limit <= 1.");
-		return drop_icmp(state, ICMPV6_TIME_EXCEED, ICMPV6_EXC_HOPLIMIT,
-				 0);
-	}
 	if (has_nonzero_segments_left(hdr6, &nonzero_location)) {
 		log_debug("Packet's segments left field is nonzero.");
 		return drop_icmp(state, ICMPV6_PARAMPROB, ICMPV6_HDR_FIELD,
