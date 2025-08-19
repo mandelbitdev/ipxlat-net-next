@@ -2054,52 +2054,37 @@ static __be16 xlat_frag_off(struct frag_hdr const *hdr_frag,
 }
 
 /*
- * has_nonzero_segments_left - Returns true if @hdr6's packet has a routing
- * header, and its Segments Left field is not zero.
- *
- * @location: if the packet has nonzero segments left, the offset
- *		of the segments left field (from the start of @hdr6) will be
- *		stored here.
- */
-static bool has_nonzero_segments_left(struct ipv6hdr const *hdr6,
-				      __u32 *location)
-{
-	struct ipv6_rt_hdr const *rt_hdr;
-	unsigned int offset;
-
-	rt_hdr = hdr_iterator_find(hdr6, NEXTHDR_ROUTING);
-	if (!rt_hdr)
-		return false;
-
-	if (rt_hdr->segments_left == 0)
-		return false;
-
-	offset = ((void *)rt_hdr) - (void *)hdr6;
-	*location = offset + offsetof(struct ipv6_rt_hdr, segments_left);
-	return true;
-}
-
-/*
  * Translates @state->in's IPv6 header into @state->out's IPv4 header.
  * Only used for external IPv6 headers. (ie. not enclosed in ICMP errors.)
  * RFC 7915 sections 5.1 and 5.1.1.
  */
 static int ttp64_ipv4_external(struct xlation *state)
 {
-	struct iphdr *hdr4;
 	struct frag_hdr const *hdr_frag;
-	__u32 nonzero_location;
+	struct iphdr *hdr4;
 	int error;
 
-	if (has_nonzero_segments_left(ipv6_hdr(state->in), &nonzero_location)) {
+	unsigned int offset = 0;
+	int flags = IP6_FH_F_SKIP_RH; // ignore RH if segments_left == 0
+	int nexthdr;
+
+	nexthdr = ipv6_find_hdr(state->in, &offset, NEXTHDR_ROUTING, NULL, &flags);
+	if (nexthdr == NEXTHDR_ROUTING) {
+		netdev_warn_once(state->dev, "UNTESTED: 6>4 routing header");
+		unsigned int pointer =
+			offset + offsetof(struct ipv6_rt_hdr, segments_left);
 		log_debug("Packet's segments left field is nonzero.");
-		return drop_icmp(state, ICMPV6_PARAMPROB, ICMPV6_HDR_FIELD,
-				 nonzero_location);
+		return drop_icmp(state, ICMPV6_PARAMPROB, ICMPV6_HDR_FIELD, pointer);
 	}
 
-	hdr4 = ip_hdr(state->out);
-	hdr_frag = pkt_frag_hdr(state->in);
+	flags = offset = 0;
+	nexthdr = ipv6_find_hdr(state->in, &offset, NEXTHDR_FRAGMENT, NULL, NULL);
 
+	if (nexthdr == NEXTHDR_FRAGMENT)
+		hdr_frag = offset ? (struct frag_hdr *)(state->in->data + offset) : NULL;
+	WARN_ON_ONCE(hdr_frag != pkt_frag_hdr(state->in));
+
+	hdr4 = ip_hdr(state->out);
 	hdr4->version = 4;
 	hdr4->ihl = 5;
 	hdr4->tos = get_traffic_class(ipv6_hdr(state->in));
