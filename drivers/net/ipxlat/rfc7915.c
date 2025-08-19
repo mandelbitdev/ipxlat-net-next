@@ -2086,15 +2086,12 @@ static bool has_nonzero_segments_left(struct ipv6hdr const *hdr6,
  */
 static int ttp64_ipv4_external(struct xlation *state)
 {
-	struct ipv6hdr const *hdr6;
 	struct iphdr *hdr4;
 	struct frag_hdr const *hdr_frag;
 	__u32 nonzero_location;
 	int error;
 
-	hdr6 = ipv6_hdr(state->in);
-
-	if (has_nonzero_segments_left(hdr6, &nonzero_location)) {
+	if (has_nonzero_segments_left(ipv6_hdr(state->in), &nonzero_location)) {
 		log_debug("Packet's segments left field is nonzero.");
 		return drop_icmp(state, ICMPV6_PARAMPROB, ICMPV6_HDR_FIELD,
 				 nonzero_location);
@@ -2105,11 +2102,11 @@ static int ttp64_ipv4_external(struct xlation *state)
 
 	hdr4->version = 4;
 	hdr4->ihl = 5;
-	hdr4->tos = get_traffic_class(hdr6);
+	hdr4->tos = get_traffic_class(ipv6_hdr(state->in));
 	hdr4->tot_len = cpu_to_be16(state->out->len);
 	/* id is set later; please scroll down. */
 	hdr4->frag_off = xlat_frag_off(hdr_frag, state);
-	hdr4->ttl = hdr6->hop_limit - 1;
+	hdr4->ttl = ipv6_hdr(state->in)->hop_limit - 1;
 	hdr4->protocol = JOOL_CB(state->out)->l4_proto;
 	/* ip4_hdr->check is set later; please scroll down. */
 
