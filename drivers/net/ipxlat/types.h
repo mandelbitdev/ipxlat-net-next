@@ -44,26 +44,6 @@ struct jool_globals {
 	struct in_addr pool6791v4;
 
 	/*
-	 * "true" if the Traffic Class field of translated IPv6 headers should
-	 * always be zeroized.
-	 * Otherwise it will be copied from the IPv4 header's TOS field.
-	 */
-	bool reset_traffic_class;
-	/*
-	 * "true" if the Type of Service (TOS) field of translated IPv4 headers
-	 * should always be set as "new_tos".
-	 * Otherwise it will be copied from the IPv6 header's Traffic Class
-	 * field.
-	 */
-	bool reset_tos;
-	/*
-	 * If "reset_tos" is "true", this is the value the translator will
-	 * always write in the TOS field of translated IPv4 headers.
-	 * If "reset_tos" is "false", then this doesn't do anything.
-	 */
-	__u8 new_tos;
-
-	/*
 	 * Smallest reachable IPv6 MTU.
 	 *
 	 * Because DF does not exist in IPv6, Jool must ensure that that any

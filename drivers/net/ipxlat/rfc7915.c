@@ -1062,13 +1062,8 @@ static int ttcp46_ipv6_common(struct xlation *state)
 	int error;
 
 	hdr6->version = 6;
-	if (state->cfg->reset_traffic_class) {
-		hdr6->priority = 0;
-		hdr6->flow_lbl[0] = 0;
-	} else {
-		hdr6->priority = hdr4->tos >> 4;
-		hdr6->flow_lbl[0] = hdr4->tos << 4;
-	}
+	hdr6->priority = hdr4->tos >> 4;
+	hdr6->flow_lbl[0] = hdr4->tos << 4;
 	hdr6->flow_lbl[1] = 0;
 	hdr6->flow_lbl[2] = 0;
 	/* hdr6->payload_len */
@@ -1826,11 +1821,6 @@ static void ttp46_icmp_err(struct xlation *state)
 	state->out = out;
 }
 
-static __u8 xlat_tos(struct jool_globals const *cfg, struct ipv6hdr const *hdr)
-{
-	return cfg->reset_tos ? cfg->new_tos : get_traffic_class(hdr);
-}
-
 static __u8 nexthdr2proto(__u8 nexthdr)
 {
 	return (nexthdr == NEXTHDR_ICMP) ? IPPROTO_ICMP : nexthdr;
@@ -2120,7 +2110,7 @@ static int ttp64_ipv4_external(struct xlation *state)
 
 	hdr4->version = 4;
 	hdr4->ihl = 5;
-	hdr4->tos = xlat_tos(state->cfg, hdr6);
+	hdr4->tos = get_traffic_class(hdr6);
 	hdr4->tot_len = cpu_to_be16(state->out->len);
 	/* id is set later; please scroll down. */
 	hdr4->frag_off = xlat_frag_off(hdr_frag, state);
@@ -2154,7 +2144,7 @@ static int ttp64_ipv4_internal(struct xlation *state)
 
 	hdr4->version = 4;
 	hdr4->ihl = 5;
-	hdr4->tos = xlat_tos(state->cfg, hdr6);
+	hdr4->tos = get_traffic_class(hdr6);
 	hdr4->tot_len = cpu_to_be16(get_tot_len_ipv6(in) -
 				    pkt_hdrs_len(in) +
 				    pkt_hdrs_len(out));
