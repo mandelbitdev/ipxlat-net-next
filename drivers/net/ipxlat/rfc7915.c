@@ -2037,16 +2037,15 @@ static int ttp64_ipv4_external(struct xlation *state)
 	hdr4->ihl = 5;
 	hdr4->tos = get_traffic_class(ipv6_hdr(state->in));
 	hdr4->tot_len = cpu_to_be16(state->out->len);
-	/* id is set later; please scroll down. */
 	hdr4->frag_off = xlat_frag_off(hdr_frag, state);
 	hdr4->ttl = ipv6_hdr(state->in)->hop_limit - 1;
 	hdr4->protocol = JOOL_CB(state->out)->l4_proto;
-	/* ip4_hdr->check is set later; please scroll down. */
 
 	error = siit64_addrs(state, &hdr4->saddr, &hdr4->daddr);
 	if (error)
 		return error;
 
+	hdr4->id = 0;
 	generate_ipv4_id(state, hdr4, hdr_frag);
 
 	hdr4->check = 0;
