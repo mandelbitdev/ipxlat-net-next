@@ -318,6 +318,11 @@ static int handle_icmp6(struct xlation *state, struct pkt_metadata const *meta)
 	     : 0;
 }
 
+/*
+ * Allocates outgoing packet, copies dst_entry and layer 4 payload into it,
+ * ensures there's enough headroom (bytes between skb->head and skb->data) for
+ * translated headers. (In other words, it does everything except for headers.)
+ */
 int pkt_init_ipv6(struct xlation *state, struct sk_buff *skb)
 {
 	struct pkt_metadata meta;
