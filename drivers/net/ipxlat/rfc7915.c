@@ -965,6 +965,8 @@ static void autofill_hdr6(struct sk_buff *first)
 	if (!first->next)
 		return;
 
+	// Slow path
+
 	frag = (struct frag_hdr *)(ipv6_hdr(first) + 1);
 	frag_offset = get_v6_frag_offset(frag) + first->len - L3V6_HDRS_LEN;
 	first_mf = is_mf_set_ipv6(frag);
@@ -1014,7 +1016,7 @@ static int ttcp46_ipv6_common(struct xlation *state)
 	if (error)
 		return error;
 
-	if (will_need_frag_hdr(hdr4) || out->next) {
+	if (will_need_frag_hdr(hdr4) || out->next) { // slow path
 		hdrf = (struct frag_hdr *)(hdr6 + 1);
 		hdrf->nexthdr = hdr6->nexthdr;
 		hdr6->nexthdr = NEXTHDR_FRAGMENT;
@@ -1054,7 +1056,7 @@ static int ttp46_ipv6_external(struct xlation *state)
 	if (error)
 		return error;
 
-	autofill_hdr6(out);
+	autofill_hdr6(out); //< slow path
 	return 0;
 }
 
