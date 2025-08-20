@@ -30,32 +30,6 @@
 
 #define L3V6_HDRS_LEN (sizeof(struct ipv6hdr) + sizeof(struct frag_hdr))
 
-/*
- * Allocates outgoing packet, copies dst_entry and layer 4 payload into it,
- * ensures there's enough headroom (bytes between skb->head and skb->data) for
- * translated headers. (In other words, it does everything except for headers.)
- */
-typedef int (*pkt_init_fn)(struct xlation *, struct sk_buff *);
-typedef int (*skb_alloc_fn)(struct xlation *);
-typedef int (*hdr_xlat_fn)(struct xlation *);
-typedef void (*icmp_error)(struct xlation *);
-
-struct translation_steps {
-	pkt_init_fn pkt_init;
-	skb_alloc_fn skb_alloc;
-	/* The function that will translate the IP header. */
-	hdr_xlat_fn xlat_l3;
-	/*
-	 * Translates everything between the external IP header and the L4
-	 * payload.
-	 */
-	hdr_xlat_fn xlat_tcp;
-	hdr_xlat_fn xlat_udp;
-	hdr_xlat_fn xlat_icmp;
-
-	icmp_error icmp_err;
-};
-
 struct bkp_skb {
 	unsigned int pulled;
 	struct {
@@ -236,53 +210,10 @@ static int become_inner_packet(struct xlation *state, struct bkp_skb_tuple *bkp,
 }
 
 static void restore_outer_packet(struct xlation *state,
-				 struct bkp_skb_tuple *bkp, bool do_out)
+				 struct bkp_skb_tuple *bkp)
 {
 	restore_pointers(state->in, &bkp->in);
-	if (do_out)
-		restore_pointers(state->out, &bkp->out);
-}
-
-static int xlat_l4_function(struct xlation *state,
-			    struct translation_steps const *steps)
-{
-	__u8 l4_proto = JOOL_CB(state->in)->l4_proto;
-
-	switch (l4_proto) {
-	case IPPROTO_TCP:
-		return steps->xlat_tcp(state);
-	case IPPROTO_UDP:
-		return steps->xlat_udp(state);
-	case IPPROTO_ICMP:
-	case NEXTHDR_ICMP:
-		return steps->xlat_icmp(state);
-	default:
-		return 0; /* Hope for the best */
-	}
-
-	WARN(1, "Unknown l4 proto: %u", l4_proto);
-	return drop(state);
-}
-
-static int ttpcomm_translate_inner_packet(struct xlation *state,
-					  struct translation_steps const *steps)
-{
-	struct bkp_skb_tuple bkp;
-	int error;
-
-	error = become_inner_packet(state, &bkp, true);
-	if (error)
-		return error;
-
-	error = steps->xlat_l3(state);
-	if (error)
-		goto end;
-
-	error = xlat_l4_function(state, steps);
-
-end:
-	restore_outer_packet(state, &bkp, true);
-	return error;
+	restore_pointers(state->out, &bkp->out);
 }
 
 /*
@@ -1419,12 +1350,7 @@ static int ttp46_icmp(struct xlation *state);
 
 static int post_icmp6error(struct xlation *state)
 {
-	static const struct translation_steps xsteps = {
-		.xlat_l3 = ttp46_ipv6_internal,
-		.xlat_tcp = ttp46_tcp,
-		.xlat_udp = ttp46_udp,
-		.xlat_icmp = ttp46_icmp,
-	};
+	struct bkp_skb_tuple bkp;
 	int error;
 
 	log_debug("Translating the inner packet (4->6)...");
@@ -1438,7 +1364,29 @@ static int post_icmp6error(struct xlation *state)
 	if (error)
 		return error;
 
-	error = ttpcomm_translate_inner_packet(state, &xsteps);
+	error = become_inner_packet(state, &bkp, true);
+	if (error)
+		return error;
+
+	error = ttp46_ipv6_internal(state);
+	if (error)
+		goto restore_outer;
+
+
+	switch (JOOL_CB(state->in)->l4_proto) {
+	case IPPROTO_TCP:
+		error = ttp46_tcp(state);
+		break;
+	case IPPROTO_UDP:
+		error = ttp46_udp(state);
+		break;
+	case IPPROTO_ICMP:
+		error = ttp46_icmp(state);
+		break;
+	}
+
+restore_outer:
+	restore_outer_packet(state, &bkp);
 	if (error)
 		return error;
 
@@ -2388,12 +2336,7 @@ static int ttp64_icmp(struct xlation *state);
 
 static int post_icmp4error(struct xlation *state, bool handle_extensions)
 {
-	static const struct translation_steps xsteps = {
-		.xlat_l3 = ttp64_ipv4_internal,
-		.xlat_tcp = ttp64_tcp,
-		.xlat_udp = ttp64_udp,
-		.xlat_icmp = ttp64_icmp,
-	};
+	struct bkp_skb_tuple bkp;
 	int error;
 
 	log_debug("Translating the inner packet (6->4)...");
@@ -2402,7 +2345,28 @@ static int post_icmp4error(struct xlation *state, bool handle_extensions)
 	if (error)
 		return error;
 
-	error = ttpcomm_translate_inner_packet(state, &xsteps);
+	error = become_inner_packet(state, &bkp, true);
+	if (error)
+		return error;
+
+	error = ttp64_ipv4_internal(state);
+	if (error)
+		goto restore_outer;
+
+	switch (JOOL_CB(state->in)->l4_proto) {
+	case IPPROTO_TCP:
+		error = ttp64_tcp(state);
+		break;
+	case IPPROTO_UDP:
+		error = ttp64_udp(state);
+		break;
+	case NEXTHDR_ICMP:
+		error = ttp64_icmp(state);
+		break;
+	}
+
+restore_outer:
+	restore_outer_packet(state, &bkp);
 	if (error)
 		return error;
 
@@ -2663,26 +2627,6 @@ static void ttp64_icmp_err(struct xlation *state)
 		   htonl(state->result.info), &saddr, &parm);
 }
 
-static const struct translation_steps steps64 = {
-	.pkt_init = pkt_init_ipv6,
-	.skb_alloc = ttp64_alloc_skb,
-	.xlat_l3 = ttp64_ipv4_external,
-	.xlat_tcp = ttp64_tcp,
-	.xlat_udp = ttp64_udp,
-	.xlat_icmp = ttp64_icmp,
-	.icmp_err = ttp64_icmp_err,
-};
-
-static const struct translation_steps steps46 = {
-	.pkt_init = pkt_init_ipv4,
-	.skb_alloc = ttp46_alloc_skb,
-	.xlat_l3 = ttp46_ipv6_external,
-	.xlat_tcp = ttp46_tcp,
-	.xlat_udp = ttp46_udp,
-	.xlat_icmp = ttp46_icmp,
-	.icmp_err = ttp46_icmp_err,
-};
-
 static bool has_l4_hdr(struct xlation *state)
 {
 	__u8 l3_proto = JOOL_CB(state->in)->l3_proto;
@@ -2698,31 +2642,69 @@ static bool has_l4_hdr(struct xlation *state)
 	return false;
 }
 
+static void ipxlat_xlat_64(struct xlation *state, struct sk_buff *in);
+static void ipxlat_xlat_46(struct xlation *state, struct sk_buff *in);
+
 void jool_xlat(struct xlation *state, struct sk_buff *in)
 {
-	struct translation_steps const *steps;
+	__u16 proto = ntohs(in->protocol);
 
-	switch (ntohs(in->protocol)) {
-	case ETH_P_IPV6:
-		steps = &steps64;
-		break;
-	case ETH_P_IP:
-		steps = &steps46;
-		break;
-	default:
-		log_debug("Unsupported l3 proto: %u", ntohs(in->protocol));
+	if (proto == ETH_P_IPV6)
+		ipxlat_xlat_64(state, in);
+	else if (proto == ETH_P_IP)
+		ipxlat_xlat_46(state, in);
+	else {
+		netdev_dbg(state->dev, "Unsupported L3 proto: %u", proto);
 		drop(state);
 		return;
 	}
+}
 
-	if (steps->pkt_init(state, in) != 0)
+static int ipxlat_xlat_64_l4(struct xlation *state)
+{
+	switch (JOOL_CB(state->in)->l4_proto) {
+	case IPPROTO_TCP:
+		return ttp64_tcp(state);
+	case IPPROTO_UDP:
+		return ttp64_udp(state);
+		break;
+	case NEXTHDR_ICMP:
+		return ttp64_icmp(state);
+	}
+
+	return 0;
+}
+
+static int ipxlat_xlat_46_l4(struct xlation *state)
+{
+	switch (JOOL_CB(state->in)->l4_proto) {
+	case IPPROTO_TCP:
+		return ttp46_tcp(state);
+	case IPPROTO_UDP:
+		return ttp46_udp(state);
+	case IPPROTO_ICMP:
+		return ttp46_icmp(state);
+	}
+
+	return 0;
+}
+
+static void ipxlat_xlat_64(struct xlation *state, struct sk_buff *in)
+{
+	int err;
+
+	if ((err = pkt_init_ipv6(state, in)) != 0)
 		goto fail;
-	if (steps->skb_alloc(state) != 0)
+
+	if ((err = ttp64_alloc_skb(state)) != 0)
 		goto fail;
-	if (steps->xlat_l3(state) != 0)
+
+	if ((err = ttp64_ipv4_external(state)) != 0)
 		goto fail;
-	if (has_l4_hdr(state) && (xlat_l4_function(state, steps) != 0))
-		goto fail;
+
+	if (has_l4_hdr(state) && (err = ipxlat_xlat_64_l4(state)) != 0)
+			goto fail;
+
 	return;
 
 fail:
@@ -2730,5 +2712,31 @@ fail:
 	state->out = NULL;
 
 	if (state->result.set)
-		steps->icmp_err(state);
+		ttp64_icmp_err(state);
+}
+
+static void ipxlat_xlat_46(struct xlation *state, struct sk_buff *in)
+{
+	int err;
+
+	if ((err = pkt_init_ipv4(state, in)) != 0)
+		goto fail;
+
+	if ((err = ttp46_alloc_skb(state)) != 0)
+		goto fail;
+
+	if ((err = ttp46_ipv6_external(state)) != 0)
+		goto fail;
+
+	if (has_l4_hdr(state) && (err = ipxlat_xlat_46_l4(state)) != 0)
+			goto fail;
+
+	return;
+
+fail:
+	kfree_skb_list(state->out);
+	state->out = NULL;
+
+	if (state->result.set)
+		ttp46_icmp_err(state);
 }
