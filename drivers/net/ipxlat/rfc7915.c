@@ -567,7 +567,7 @@ include_headers:
 	return headers + payload;
 }
 
-static int allocate_fast(struct xlation *state, bool ignore_df,
+static int ttp46_allocate_fast(struct xlation *state, bool ignore_df,
 			 unsigned short gso_size)
 {
 	struct sk_buff *in = state->in;
@@ -645,7 +645,7 @@ static int allocate_fast(struct xlation *state, bool ignore_df,
 	return 0;
 }
 
-static int allocate_slow(struct xlation *state, unsigned int mpl)
+static int ttp46_allocate_slow(struct xlation *state, unsigned int mpl)
 {
 	struct sk_buff *in;
 	struct sk_buff **previous;
@@ -861,7 +861,7 @@ static int ttp46_alloc_skb(struct xlation *state)
 		 * ICMP error means the fragment header will never be added,
 		 * so Fast Path is always viable.
 		 */
-		return allocate_fast(state, false, 0);
+		return ttp46_allocate_fast(state, false, 0);
 	}
 
 	out_len = fragment_exceeds_mtu46(in);
@@ -878,7 +878,7 @@ static int ttp46_alloc_skb(struct xlation *state)
 					 ICMP_FRAG_NEEDED,
 					 max(576u, nexthop_mtu - 20u));
 		} else {
-			return allocate_fast(state, in->ignore_df,
+			return ttp46_allocate_fast(state, in->ignore_df,
 					     skb_shinfo(in)->gso_size);
 		}
 	}
@@ -888,14 +888,14 @@ static int ttp46_alloc_skb(struct xlation *state)
 		 * Force LIM and Fragmentation ID preservation through manual
 		 * fragmentation.
 		 */
-		return allocate_slow(state, mpl);
+		return ttp46_allocate_slow(state, mpl);
 	}
 
 	/*
 	 * Dodged a bullet; no need to fragment further, we'll just
 	 * build the Fragmentation header ourselves.
 	 */
-	return allocate_fast(state, false, 0);
+	return ttp46_allocate_fast(state, false, 0);
 }
 
 /*
