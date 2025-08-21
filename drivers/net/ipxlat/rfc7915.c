@@ -71,7 +71,7 @@ static bool will_need_frag_hdr(const struct iphdr *hdr)
 	return ip_is_fragment(hdr);
 }
 
-static int move_pointers_in(struct sk_buff *skb, __u8 protocol,
+static int move_pointers_for_inpkg(struct sk_buff *skb, __u8 protocol,
 			    unsigned int l3hdr_len)
 {
 	unsigned int l4hdr_len;
@@ -108,7 +108,7 @@ static int move_pointers_in(struct sk_buff *skb, __u8 protocol,
 	return 0;
 }
 
-static int move_pointers_out(struct sk_buff *in, struct sk_buff *out,
+static int move_pointers_for_outpkg(struct sk_buff *in, struct sk_buff *out,
 			     unsigned int l3hdr_len)
 {
 	struct jool_cb *cb;
@@ -133,14 +133,14 @@ static int move_pointers4(struct sk_buff *in, struct sk_buff *out)
 	int error;
 
 	hdr4 = pkt_payload(in);
-	error = move_pointers_in(in, hdr4->protocol, 4 * hdr4->ihl);
+	error = move_pointers_for_inpkg(in, hdr4->protocol, 4 * hdr4->ihl);
 	if (error)
 		return error;
 
 	l3hdr_len = sizeof(struct ipv6hdr);
 	if (will_need_frag_hdr(hdr4))
 		l3hdr_len += sizeof(struct frag_hdr);
-	return move_pointers_out(in, out, l3hdr_len);
+	return move_pointers_for_outpkg(in, out, l3hdr_len);
 }
 
 static int move_pointers6(struct sk_buff *in, struct sk_buff *out)
@@ -151,7 +151,7 @@ static int move_pointers6(struct sk_buff *in, struct sk_buff *out)
 
 	hdr_iterator_last(&iterator);
 
-	error = move_pointers_in(in, iterator.hdr_type,
+	error = move_pointers_for_inpkg(in, iterator.hdr_type,
 				 iterator.data - (void *)hdr6);
 	if (error)
 		return error;
