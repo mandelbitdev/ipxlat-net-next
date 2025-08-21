@@ -126,7 +126,7 @@ static int move_pointers_out(struct sk_buff *in, struct sk_buff *out,
 	return 0;
 }
 
-static int move_pointers4(struct sk_buff *in, struct sk_buff *out, bool do_out)
+static int move_pointers4(struct sk_buff *in, struct sk_buff *out)
 {
 	struct iphdr *hdr4;
 	unsigned int l3hdr_len;
@@ -137,16 +137,13 @@ static int move_pointers4(struct sk_buff *in, struct sk_buff *out, bool do_out)
 	if (error)
 		return error;
 
-	if (!do_out)
-		return 0;
-
 	l3hdr_len = sizeof(struct ipv6hdr);
 	if (will_need_frag_hdr(hdr4))
 		l3hdr_len += sizeof(struct frag_hdr);
 	return move_pointers_out(in, out, l3hdr_len);
 }
 
-static int move_pointers6(struct sk_buff *in, struct sk_buff *out, bool do_out)
+static int move_pointers6(struct sk_buff *in, struct sk_buff *out)
 {
 	struct ipv6hdr *hdr6 = pkt_payload(in);
 	struct hdr_iterator iterator = HDR_ITERATOR_INIT(hdr6);
@@ -159,7 +156,7 @@ static int move_pointers6(struct sk_buff *in, struct sk_buff *out, bool do_out)
 	if (error)
 		return error;
 
-	return do_out ? move_pointers_out(in, out, sizeof(struct iphdr)) : 0;
+	return move_pointers_for_outpkg(in, out, sizeof(struct iphdr));
 }
 
 static void backup_pointers(struct sk_buff *skb, struct bkp_skb *bkp)
@@ -185,23 +182,21 @@ static void restore_pointers(struct sk_buff *skb, struct bkp_skb *bkp)
 	cb->is_inner = 0;
 }
 
-static int become_inner_packet(struct xlation *state, struct bkp_skb_tuple *bkp,
-			       bool do_out)
+static int become_inner_packet(struct xlation *state, struct bkp_skb_tuple *bkp)
 {
 	struct sk_buff *in = state->in;
 	struct sk_buff *out = state->out;
 
 	backup_pointers(in, &bkp->in);
-	if (do_out)
-		backup_pointers(out, &bkp->out);
+	backup_pointers(out, &bkp->out);
 
 	switch (JOOL_CB(in)->l3_proto) {
 	case PF_INET:
-		if (move_pointers4(in, out, do_out))
+		if (move_pointers4(in, out))
 			return drop(state);
 		break;
 	case PF_INET6:
-		if (move_pointers6(in, out, do_out))
+		if (move_pointers6(in, out))
 			return drop(state);
 		break;
 	}
@@ -1366,7 +1361,7 @@ static int post_icmp6error(struct xlation *state)
 	if (error)
 		return error;
 
-	error = become_inner_packet(state, &bkp, true);
+	error = become_inner_packet(state, &bkp);
 	if (error)
 		return error;
 
@@ -2346,7 +2341,7 @@ static int post_icmp4error(struct xlation *state, bool handle_extensions)
 	if (error)
 		return error;
 
-	error = become_inner_packet(state, &bkp, true);
+	error = become_inner_packet(state, &bkp);
 	if (error)
 		return error;
 
