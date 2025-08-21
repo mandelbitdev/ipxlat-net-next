@@ -445,18 +445,10 @@ static int handle_icmp_extension(struct xlation *state,
 static void skb_cleanup_copy(struct sk_buff *skb)
 {
 	/* https://github.com/NICMx/Jool/issues/289 */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)
 	nf_reset_ct(skb);
-#else
-	nf_reset(skb);
-#endif
 
 	/* https://github.com/NICMx/Jool/issues/400 */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 18, 0)
 	skb_clear_tstamp(skb);
-#else
-	skb->tstamp = 0;
-#endif
 
 //	skb_dst_drop(skb);
 }
