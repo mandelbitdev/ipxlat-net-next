@@ -45,9 +45,6 @@ struct bkp_skb_tuple {
 	struct bkp_skb out;
 };
 
-/* ICMP Extensions */
-
-/* See /test/graybox/test-suite/siit/7915/README.md#ic */
 struct icmpext_args {
 	size_t max_pkt_len; /* Maximum (allowed outgoing) Packet Length */
 	size_t ipl; /* Internal Packet Length */
@@ -243,7 +240,7 @@ static void partialize_skb(struct sk_buff *out, __u16 csum_offset)
 	out->csum_offset = csum_offset;
 }
 
-static int fix_ie(struct xlation *state, size_t in_ie_offset, size_t ipl,
+static int fix_icmp_extensions(struct xlation *state, size_t in_ie_offset, size_t ipl,
 		  size_t pad, size_t iel)
 {
 	struct sk_buff *skb_old;
@@ -372,8 +369,8 @@ static void compute_icmp6_csum(struct sk_buff *out)
  * If this function succeeds, it will return the value of the ICMP header length
  * in args->ipl.
  */
-static int handle_icmp_extension(struct xlation *state,
-				 struct icmpext_args *args)
+static int squeeze_icmp_extensions_common(
+	struct xlation *state, struct icmpext_args *args)
 {
 	struct sk_buff *in;
 	struct sk_buff *out;
@@ -438,8 +435,9 @@ static int handle_icmp_extension(struct xlation *state,
 	}
 
 	/* Move everything around */
-	return fix_ie(state, skb_network_offset(in) + in_ieo, out_ipl, out_pad,
-		      out_iel);
+	return fix_icmp_extensions(
+		state, skb_network_offset(in) + in_ieo,
+		out_ipl, out_pad, out_iel);
 }
 
 static void skb_cleanup_copy(struct sk_buff *skb)
@@ -1182,7 +1180,7 @@ static int icmp4_to_icmp6_dest_unreach(struct xlation *state)
 /*
  * One-liner for translating "Parameter Problem" messages from ICMPv4 to ICMPv6.
  */
-static int icmp4_to_icmp6_param_prob(struct xlation *state)
+static int icmp46_param_prob(struct xlation *state)
 {
 #define DROP 255
 	static const __u8 ptrs[] = {
@@ -1263,13 +1261,13 @@ static int validate_icmp4_csum(struct xlation *state)
 	return 0;
 }
 
-static bool should_remove_ie(struct xlation *state)
+static bool icmp4_should_remove_ie(struct sk_buff *skb)
 {
 	struct icmphdr *hdr;
 	__u8 type;
 	__u8 code;
 
-	hdr = icmp_hdr(state->in);
+	hdr = icmp_hdr(skb);
 	type = hdr->type;
 	code = hdr->code;
 
@@ -1286,7 +1284,7 @@ static bool should_remove_ie(struct xlation *state)
 	return false;
 }
 
-static int handle_icmp6_extension(struct xlation *state)
+static int icmp46_squeeze_extensions(struct xlation *state)
 {
 	struct icmpext_args args;
 	struct sk_buff *out;
@@ -1295,9 +1293,9 @@ static int handle_icmp6_extension(struct xlation *state)
 	args.max_pkt_len = 1280;
 	args.ipl = icmp_hdr(state->in)->icmp4_datagram_length << 2;
 	args.out_bits = 3;
-	args.force_remove_ie = should_remove_ie(state);
+	args.force_remove_ie = icmp4_should_remove_ie(state->in);
 
-	error = handle_icmp_extension(state, &args);
+	error = squeeze_icmp_extensions_common(state, &args);
 	if (error)
 		return error;
 
@@ -1337,7 +1335,7 @@ static int ttp46_tcp(struct xlation *state);
 static int ttp46_udp(struct xlation *state);
 static int ttp46_icmp(struct xlation *state);
 
-static int post_icmp6error(struct xlation *state)
+static int icmp46_post_icmp6error(struct xlation *state)
 {
 	struct bkp_skb_tuple bkp;
 	int error;
@@ -1379,7 +1377,7 @@ restore_outer:
 	if (error)
 		return error;
 
-	error = handle_icmp6_extension(state);
+	error = icmp46_squeeze_extensions(state);
 	if (error)
 		return error;
 
@@ -1464,13 +1462,13 @@ static int ttp46_icmp(struct xlation *state)
 		error = icmp4_to_icmp6_dest_unreach(state);
 		if (error)
 			return error;
-		return post_icmp6error(state);
+		return icmp46_post_icmp6error(state);
 
 	case ICMP_TIME_EXCEEDED:
 		outhdr->icmp6_type = ICMPV6_TIME_EXCEED;
 		outhdr->icmp6_code = inhdr->code;
 		outhdr->icmp6_unused = 0;
-		return post_icmp6error(state);
+		return icmp46_post_icmp6error(state);
 
 	case ICMP_PARAMETERPROB:
 		outhdr->icmp6_type = ICMPV6_PARAMPROB;
@@ -1482,10 +1480,10 @@ static int ttp46_icmp(struct xlation *state)
 		default:
 			goto fail;
 		}
-		error = icmp4_to_icmp6_param_prob(state);
+		error = icmp46_param_prob(state);
 		if (error)
 			return error;
-		return post_icmp6error(state);
+		return icmp46_post_icmp6error(state);
 	}
 
 fail:
@@ -2274,7 +2272,7 @@ static void update_total_length(struct sk_buff const *out)
 	hdr->check = ip_fast_csum(hdr, hdr->ihl);
 }
 
-static int handle_icmp4_extension(struct xlation *state)
+static int icmp64_squeeze_extensions(struct xlation *state)
 {
 	struct icmpext_args args;
 	int error;
@@ -2284,7 +2282,7 @@ static int handle_icmp4_extension(struct xlation *state)
 	args.out_bits = 2;
 	args.force_remove_ie = false;
 
-	error = handle_icmp_extension(state, &args);
+	error = squeeze_icmp_extensions_common(state, &args);
 	if (error)
 		return error;
 
@@ -2322,7 +2320,7 @@ static int ttp64_tcp(struct xlation *state);
 static int ttp64_udp(struct xlation *state);
 static int ttp64_icmp(struct xlation *state);
 
-static int post_icmp4error(struct xlation *state, bool handle_extensions)
+static int icmp64_post_icmp4error(struct xlation *state, bool squeeze_extensions)
 {
 	struct bkp_skb_tuple bkp;
 	int error;
@@ -2358,8 +2356,8 @@ restore_outer:
 	if (error)
 		return error;
 
-	if (handle_extensions) {
-		error = handle_icmp4_extension(state);
+	if (squeeze_extensions) {
+		error = icmp64_squeeze_extensions(state);
 		if (error)
 			return error;
 	}
@@ -2420,13 +2418,13 @@ static int ttp64_icmp(struct xlation *state)
 			goto fail;
 		}
 		outhdr->icmp4_unused = 0;
-		return post_icmp4error(state, true);
+		return icmp64_post_icmp4error(state, true);
 
 	case ICMPV6_TIME_EXCEED:
 		outhdr->type = ICMP_TIME_EXCEEDED;
 		outhdr->code = inhdr->icmp6_code;
 		outhdr->icmp4_unused = 0;
-		return post_icmp4error(state, true);
+		return icmp64_post_icmp4error(state, true);
 
 	case ICMPV6_PKT_TOOBIG:
 		/*
@@ -2441,7 +2439,7 @@ static int ttp64_icmp(struct xlation *state)
 		error = compute_mtu4(state);
 		if (error)
 			return error;
-		return post_icmp4error(state, false);
+		return icmp64_post_icmp4error(state, false);
 
 	case ICMPV6_PARAMPROB:
 		switch (inhdr->icmp6_code) {
@@ -2459,7 +2457,7 @@ static int ttp64_icmp(struct xlation *state)
 		error = icmp6_to_icmp4_param_prob(state);
 		if (error)
 			return error;
-		return post_icmp4error(state, false);
+		return icmp64_post_icmp4error(state, false);
 	}
 
 fail:
