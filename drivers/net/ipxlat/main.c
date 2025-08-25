@@ -218,7 +218,7 @@ static void ipxlat_setup(struct net_device *dev)
 	dev->lltx = true;
 	dev->features |= feat;
 	dev->hw_features |= feat;
-	dev->hw_enc_features = feat;
+	dev->hw_enc_features |= feat;
 
 	dev->netdev_ops = &ipxlat_netdev_ops;
 	dev->needs_free_netdev = true;
