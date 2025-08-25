@@ -556,7 +556,7 @@ static int ipip6_err(struct sk_buff *skb, u32 info)
 	case ICMP_TIME_EXCEEDED:
 		if (code != ICMP_EXC_TTL)
 			return 0;
-		data_len = icmp_hdr(skb)->un.reserved[1] * 4; /* RFC 4884 4.1 */
+		data_len = icmp_hdr(skb)->un.ext.dgram_len * 4; /* RFC 4884 4.1 */
 		break;
 	case ICMP_REDIRECT:
 		break;
