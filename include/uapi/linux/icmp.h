@@ -100,6 +100,10 @@ struct icmphdr {
 		__be16	__unused;
 		__be16	mtu;
 	} frag;
+	struct { /* RFC4884 */
+		__u8 dgram_len;
+		__u8 reserved[3];
+	} ext;
 	__u8	reserved[4];
   } un;
 };

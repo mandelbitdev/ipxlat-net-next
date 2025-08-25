@@ -405,7 +405,7 @@ static void ipv4_icmp_error_rfc4884(const struct sk_buff *skb,
 	case ICMP_TIME_EXCEEDED:
 	case ICMP_PARAMETERPROB:
 		ip_icmp_error_rfc4884(skb, out, sizeof(struct icmphdr),
-				      icmp_hdr(skb)->un.reserved[1] * 4);
+				      icmp_hdr(skb)->un.ext.dgram_len * 4);
 	}
 }
 

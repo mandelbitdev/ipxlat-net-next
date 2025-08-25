@@ -192,7 +192,7 @@ static int ipgre_err(struct sk_buff *skb, u32 info,
 		unsigned int data_len = 0;
 
 		if (type == ICMP_TIME_EXCEEDED)
-			data_len = icmp_hdr(skb)->un.reserved[1] * 4; /* RFC 4884 4.1 */
+			data_len = icmp_hdr(skb)->un.ext.dgram_len * 4; /* RFC 4884 4.1 */
 
 		if (!ip6_err_gen_icmpv6_unreach(skb, iph->ihl * 4 + tpi->hdr_len,
 						type, data_len))
