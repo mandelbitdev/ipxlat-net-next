@@ -129,7 +129,7 @@ static int move_pointers4(struct sk_buff *in, struct sk_buff *out)
 	unsigned int l3hdr_len;
 	int error;
 
-	hdr4 = pkt_payload(in);
+	hdr4 = pkt_payload(in); // IP header in ICMP packet
 	error = move_pointers_for_inpkg(in, hdr4->protocol, 4 * hdr4->ihl);
 	if (error)
 		return error;
@@ -142,7 +142,7 @@ static int move_pointers4(struct sk_buff *in, struct sk_buff *out)
 
 static int move_pointers6(struct sk_buff *in, struct sk_buff *out)
 {
-	struct ipv6hdr *hdr6 = pkt_payload(in);
+	struct ipv6hdr *hdr6 = pkt_payload(in); // IPv6 header in ICMPv6 packet
 	struct hdr_iterator iterator = HDR_ITERATOR_INIT(hdr6);
 	int error;
 
