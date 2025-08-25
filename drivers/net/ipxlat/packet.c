@@ -369,7 +369,6 @@ int pkt_init_ipv6(struct xlation *state, struct sk_buff *skb)
 		return truncated(state, "headers");
 
 	cb = JOOL_CB(skb);
-	cb->l3_proto = PF_INET6;
 	cb->l4_proto = meta.l4_proto;
 	cb->is_inner = 0;
 	cb->frag_offset = meta.fhdr_offset;
@@ -536,7 +535,6 @@ int pkt_init_ipv4(struct xlation *state, struct sk_buff *skb)
 	}
 
 	cb = JOOL_CB(skb);
-	cb->l3_proto = PF_INET;
 	cb->l4_proto = meta.l4_proto;
 	cb->is_inner = false;
 	cb->frag_offset = 0;

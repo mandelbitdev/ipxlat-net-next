@@ -190,12 +190,12 @@ static int become_inner_packet(struct xlation *state, struct bkp_skb_tuple *bkp)
 	backup_pointers(in, &bkp->in);
 	backup_pointers(out, &bkp->out);
 
-	switch (JOOL_CB(in)->l3_proto) {
-	case PF_INET:
+	switch (ip_hdr(in)->version) {
+	case 4:
 		if (move_pointers4(in, out))
 			return drop(state);
 		break;
-	case PF_INET6:
+	case 6:
 		if (move_pointers6(in, out))
 			return drop(state);
 		break;
@@ -378,12 +378,12 @@ static int handle_icmp_extension(struct xlation *state,
 	struct sk_buff *in;
 	struct sk_buff *out;
 	size_t payload_len; /* Incoming packet's payload length */
-	size_t in_iel; /* Incoming packet's IE length */
-	size_t max_iel; /* Maximum outgoing packet's allowable IE length */
-	size_t in_ieo; /* Incoming packet's IE offset */
+	size_t in_iel; /* Incoming packet's ICMP Ext length */
+	size_t max_iel; /* Maximum outgoing packet's allowable ICMP Ext length */
+	size_t in_ieo; /* Incoming packet's ICMP Ext offset */
 	size_t out_ipl; /* Outgoing packet's internal packet length */
 	size_t out_pad; /* Outgoing packet's padding length */
-	size_t out_iel; /* Outgoing packet's IE length */
+	size_t out_iel; /* Outgoing packet's ICMP Ext length */
 
 	in = state->in;
 	out = state->out;
@@ -615,7 +615,7 @@ static int ttp46_allocate_fast(struct xlation *state, bool ignore_df,
 	}
 
 	/* Wrap up. */
-	pkt_fill(state->out, PF_INET6, proto2nexthdr(JOOL_CB(in)->l4_proto),
+	pkt_fill(state->out, proto2nexthdr(JOOL_CB(in)->l4_proto),
 		 hdr_frag, skb_transport_header(out) + pkt_l4hdr_len(in));
 
 	out->ignore_df = ignore_df;
@@ -676,7 +676,7 @@ static int ttp46_allocate_slow(struct xlation *state, unsigned int mpl)
 
 		skb_set_transport_header(out, L3V6_HDRS_LEN);
 		if (out == state->out) {
-			pkt_fill(state->out, PF_INET6,
+			pkt_fill(state->out,
 				 proto2nexthdr(JOOL_CB(in)->l4_proto), frag,
 				 l3_payload + pkt_l4hdr_len(in));
 		}
@@ -1910,7 +1910,7 @@ static int ttp64_alloc_skb(struct xlation *state)
 	skb_set_transport_header(out, sizeof(struct iphdr));
 
 	/* Wrap up. */
-	pkt_fill(state->out, PF_INET, nexthdr2proto(JOOL_CB(in)->l4_proto),
+	pkt_fill(state->out, nexthdr2proto(JOOL_CB(in)->l4_proto),
 		 NULL, skb_transport_header(out) + pkt_l4hdr_len(in));
 
 	out->protocol = htons(ETH_P_IP);
@@ -2615,21 +2615,6 @@ static void ttp64_icmp_err(struct xlation *state)
 		   htonl(state->result.info), &saddr, &parm);
 }
 
-static bool has_l4_hdr(struct xlation *state)
-{
-	__u8 l3_proto = JOOL_CB(state->in)->l3_proto;
-
-	switch (l3_proto) {
-	case PF_INET6:
-		return is_first_frag6(pkt_frag_hdr(state->in));
-	case PF_INET:
-		return is_first_frag4(ip_hdr(state->in));
-	}
-
-	WARN(1, "Supposedly unreachable code reached. Proto: %u", l3_proto);
-	return false;
-}
-
 static void ipxlat_xlat_64(struct xlation *state, struct sk_buff *in);
 static void ipxlat_xlat_46(struct xlation *state, struct sk_buff *in);
 
@@ -2690,7 +2675,7 @@ static void ipxlat_xlat_64(struct xlation *state, struct sk_buff *in)
 	if ((err = ttp64_ipv4_external(state)) != 0)
 		goto fail;
 
-	if (has_l4_hdr(state) && (err = ipxlat_xlat_64_l4(state)) != 0)
+	if (is_first_frag6(pkt_frag_hdr(state->in)) && (err = ipxlat_xlat_64_l4(state)) != 0)
 			goto fail;
 
 	return;
@@ -2716,7 +2701,7 @@ static void ipxlat_xlat_46(struct xlation *state, struct sk_buff *in)
 	if ((err = ttp46_ipv6_external(state)) != 0)
 		goto fail;
 
-	if (has_l4_hdr(state) && (err = ipxlat_xlat_46_l4(state)) != 0)
+	if (is_first_frag4(ip_hdr(state->in)) && (err = ipxlat_xlat_46_l4(state)) != 0)
 			goto fail;
 
 	return;
