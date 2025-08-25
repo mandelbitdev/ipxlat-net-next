@@ -170,7 +170,6 @@ static inline unsigned int tcp_hdr_len(struct tcphdr const *hdr)
 }
 
 struct jool_cb {
-	__u8 l3_proto;
 	__u8 l4_proto;
 	/* Is this a subpacket, contained in an ICMP error? */
 	bool is_inner;
@@ -195,19 +194,18 @@ struct jool_cb {
 /*
  * Initializes @pkt using the rest of the arguments.
  */
-static inline void pkt_fill(struct sk_buff *skb, __u8 l3_proto, __u8 l4_proto,
+static inline void pkt_fill(struct sk_buff *skb, __u8 l4_proto,
 			    struct frag_hdr *frag, void *payload)
 {
 	struct jool_cb *cb = JOOL_CB(skb);
 
-	cb->l3_proto = l3_proto;
 	cb->l4_proto = l4_proto;
 	cb->is_inner = 0;
 	cb->frag_offset = frag ? ((unsigned char *)frag - skb->data) : 0;
 	cb->payload_offset = (unsigned char *)payload - skb->data;
 }
 
-/* l3_proto must be IPv6. */
+/* must be IPv6. */
 static inline struct frag_hdr *pkt_frag_hdr(struct sk_buff const *skb)
 {
 	unsigned int offset = JOOL_CB(skb)->frag_offset;
