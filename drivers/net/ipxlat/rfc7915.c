@@ -358,7 +358,7 @@ static void compute_icmp6_csum(struct sk_buff *out)
  * 	- If it does fit, trim the Optional Part if needed.
  * - Add padding to the internal packet if necessary.
  *
- * Again, see /test/graybox/test-suite/siit/7915/README.md#ic.
+ * See /test/graybox/test-suite/siit/7915/README.md#ic.
  *
  * "Handle the ICMP Extension" does NOT mean:
  *
