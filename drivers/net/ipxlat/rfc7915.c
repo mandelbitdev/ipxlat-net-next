@@ -1777,9 +1777,10 @@ static __u8 xlat_proto(struct ipv6hdr const *hdr6)
  * 1: First fragment exceeds MTU. (ie. PTB needed)
  * 2: Subsequent fragment exceeds MTU. (ie. PTB not needed)
  */
-static int fragment_exceeds_mtu64(struct sk_buff const *in, unsigned int mtu)
+static int ttp64_fragment_exceeds_mtu(struct xlation *state)
 {
-	struct sk_buff *iter;
+	struct sk_buff *iter, *in = state->in;
+	unsigned mtu = state->dev->mtu; // TODO: not correct
 	unsigned short gso_size;
 	int delta;
 
@@ -1823,26 +1824,10 @@ static int fragment_exceeds_mtu64(struct sk_buff const *in, unsigned int mtu)
 	return 0;
 
 generic_too_big:
-	return is_first_frag6(pkt_frag_hdr(in)) ? 1 : 2;
-}
-
-static int validate_size(struct xlation *state)
-{
-	unsigned int nexthop_mtu;
-
-	nexthop_mtu = state->dev->mtu;
-	switch (fragment_exceeds_mtu64(state->in, nexthop_mtu)) {
-	case 0:
-		return 0;
-	case 1:
-		return drop_icmp(state, ICMPV6_PKT_TOOBIG, 0,
-				 max(1280u, nexthop_mtu + 20u));
-	case 2:
+	if (is_first_frag6(pkt_frag_hdr(in)))
+		return drop_icmp(state, ICMPV6_PKT_TOOBIG, 0, max(1280u, mtu + 20u));
+	else
 		return drop(state);
-	}
-
-	WARN(1, "fragment_exceeds_mtu64() returned garbage.");
-	return drop(state);
 }
 
 static int ttp64_alloc_skb(struct xlation *state)
@@ -1852,7 +1837,7 @@ static int ttp64_alloc_skb(struct xlation *state)
 	struct skb_shared_info *shinfo;
 	int error;
 
-	error = validate_size(state);
+	error = ttp64_fragment_exceeds_mtu(state);
 	if (error)
 		return error;
 
