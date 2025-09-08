@@ -242,6 +242,7 @@ static void restore_outer_packet(struct xlation *state,
  */
 static void partialize_skb(struct sk_buff *out, __u16 csum_offset)
 {
+	// TODO: Replace with skb_partial_csum_set()?
 	out->ip_summed = CHECKSUM_PARTIAL;
 	out->csum_start = skb_transport_header(out) - out->head;
 	out->csum_offset = csum_offset;
@@ -536,6 +537,8 @@ static unsigned int ttp46_fragment_exceeds_mtu(struct sk_buff *in)
 	if (shinfo->gso_size) {
 		payload = shinfo->gso_size;
 		goto include_headers;
+		// TODO: cf. skb_gso_validate_network_len,
+		// skb_gso_network_seglen,
 	}
 
 	if (shinfo->frag_list) {
@@ -544,7 +547,7 @@ static unsigned int ttp46_fragment_exceeds_mtu(struct sk_buff *in)
 		 * nf_defrag_ipv4 only enables DF when the biggest DF fragment
 		 * is also the biggest fragment.
 		 */
-		return IPCB(in)->frag_max_size;
+		return IPCB(in)->frag_max_size; // TODO: O_O this overlaps with JOOL_CB!!
 	}
 
 	payload = in->len - pkt_hdrs_len(in);
@@ -582,7 +585,8 @@ static int ttp46_alloc_fast(struct xlation *state, bool ignore_df,
 	}
 	state->out = out;
 
-	skb_cleanup_copy(out);
+	skb_cleanup_copy(out); // TODO: resets nfc tstamp, probably not
+			       // needed anymore?
 
 	/* Remove outer l3 and l4 headers from the copy. */
 	skb_pull(out, pkt_hdrs_len(in));
@@ -898,6 +902,7 @@ static int ttp46_alloc_skb(struct xlation *state)
  */
 static bool has_unexpired_src_route(struct iphdr *hdr)
 {
+	// TODO: Use __ip_options_compile() see ipv4_find_option()
 	unsigned char *current_opt, *end_of_opts;
 	__u8 src_route_len, src_route_ptr;
 
@@ -1512,6 +1517,7 @@ fail:
  */
 static __sum16 skb_list_csum(struct sk_buff *out, __u8 proto)
 {
+	// TODO: Replace by skb_checksum()?
 	struct sk_buff *skb;
 	__wsum csum;
 	int l4_offset;
