@@ -12,6 +12,7 @@
 #include <linux/icmp.h>
 #include <linux/icmpv6.h>
 #include <linux/version.h>
+#include <linux/minmax.h>
 
 #include <net/ip.h>
 #include <net/ip6_checksum.h>
@@ -2061,15 +2062,6 @@ static int ttp64_ip_internal(struct xlation *state)
 	return 0;
 }
 
-/*
- * One liner for creating the ICMPv4 header's MTU field.
- * Returns the smallest out of the three parameters.
- */
-static __be16 minimum(unsigned int mtu1, unsigned int mtu2, unsigned int mtu3)
-{
-	return cpu_to_be16(min(mtu1, min(mtu2, mtu3)));
-}
-
 static int icmp64_compute_mtu4(struct xlation const *state)
 {
 	/* Meant for unit tests. */
@@ -2092,8 +2084,10 @@ static int icmp64_compute_mtu4(struct xlation const *state)
 	log_debug("In dev MTU: %u", in_mtu);
 	log_debug("Out dev MTU: %u", out_mtu);
 
-	out_icmp->un.frag.mtu = minimum(be32_to_cpu(in_icmp->icmp6_mtu) - 20,
-					out_mtu, in_mtu - 20);
+	out_icmp->un.frag.mtu = cpu_to_be16(
+		min3(be32_to_cpu(in_icmp->icmp6_mtu) - 20,
+		     out_mtu,
+		     in_mtu - 20));
 	log_debug("Resulting MTU: %u", be16_to_cpu(out_icmp->un.frag.mtu));
 
 	return 0;
