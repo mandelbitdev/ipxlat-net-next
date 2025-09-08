@@ -1987,6 +1987,7 @@ static __be16 xlat64_frag_off(struct frag_hdr const *hdr_frag,
  */
 static int ttp64_ip_external(struct xlation *state)
 {
+	struct ipv6hdr const *hdr6 = ipv6_hdr(state->in);
 	struct frag_hdr const *hdr_frag;
 	struct iphdr *hdr4;
 	int error;
@@ -2014,11 +2015,11 @@ static int ttp64_ip_external(struct xlation *state)
 	hdr4 = ip_hdr(state->out);
 	hdr4->version = 4;
 	hdr4->ihl = 5;
-	hdr4->tos = get_traffic_class(ipv6_hdr(state->in));
+	hdr4->tos = get_traffic_class(hdr6);
 	hdr4->tot_len = cpu_to_be16(state->out->len);
-	hdr4->ttl = ipv6_hdr(state->in)->hop_limit - 1;
-	hdr4->protocol = JOOL_CB(state->out)->l4_proto;
 	hdr4->frag_off = xlat64_frag_off(hdr_frag, state);
+	hdr4->ttl = hdr6->hop_limit - 1; // TODO: don't do for _internal() for codesharing
+	hdr4->protocol = JOOL_CB(state->out)->l4_proto; // TODO: _internal uses nexthdr2proto
 
 	error = siit64_addrs(state, &hdr4->saddr, &hdr4->daddr);
 	if (error)
