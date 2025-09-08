@@ -143,14 +143,20 @@ static int move_pointers4(struct sk_buff *in, struct sk_buff *out)
 
 static int move_pointers6(struct sk_buff *in, struct sk_buff *out)
 {
-	struct ipv6hdr *hdr6 = pkt_payload(in); // IPv6 header in ICMPv6 packet
-	struct hdr_iterator iterator = HDR_ITERATOR_INIT(hdr6);
+	unsigned inh_off = JOOL_CB(in)->payload_offset + sizeof(struct ipv6hdr);
+	struct ipv6hdr *ihdr6 = pkt_payload(in);
+	u8 nexthdr = ihdr6->nexthdr;
+	__be16 frag;
 	int error;
 
-	hdr_iterator_last(&iterator);
+        int ith_off = ipv6_skip_exthdr(in, inh_off, &nexthdr, &frag);
+	if (ith_off < 0)
+		return -EINVAL;
 
-	error = move_pointers_for_inpkg(in, iterator.hdr_type,
-				 iterator.data - (void *)hdr6);
+        unsigned l3hdr_len =
+		ith_off - JOOL_CB(in)->payload_offset;
+
+	error = move_pointers_for_inpkg(in, nexthdr, l3hdr_len);
 	if (error)
 		return error;
 
