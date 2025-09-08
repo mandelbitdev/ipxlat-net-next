@@ -1110,7 +1110,7 @@ static __be32 icmp6_min_mtu(struct xlation *state, unsigned int pkt_mtu,
 static int icmp46_compute_mtu6(struct xlation *state)
 {
 	/* Meant for hairpinning and unit tests. */
-	static const unsigned int INFINITE = 0xffffffff;
+	static const unsigned int INFINITE_MTU = 0xffffffff; // TODO
 	struct net_device *in_dev;
 	struct dst_entry *out_dst;
 	struct icmphdr *in_icmp;
@@ -1122,9 +1122,9 @@ static int icmp46_compute_mtu6(struct xlation *state)
 	in_icmp = icmp_hdr(state->in);
 	out_icmp = icmp6_hdr(state->out);
 	in_dev = state->in->dev;
-	in_mtu = in_dev ? in_dev->mtu : INFINITE;
-	out_dst = skb_dst(state->out);
-	out_mtu = out_dst ? dst_mtu(out_dst) : INFINITE;
+	in_mtu = in_dev ? in_dev->mtu : INFINITE_MTU;
+	out_dst = skb_dst(state->out); // TODO: probably sitt dev now, need to reconsider
+	out_mtu = out_dst ? dst_mtu(out_dst) : INFINITE_MTU;
 
 	log_debug("Packet MTU: %u", be16_to_cpu(in_icmp->un.frag.mtu));
 	log_debug("In dev MTU: %u", in_mtu);
@@ -2072,7 +2072,7 @@ static int ttp64_ip_internal(struct xlation *state)
 static int icmp64_compute_mtu4(struct xlation const *state)
 {
 	/* Meant for unit tests. */
-	static const unsigned int INFINITE = 0xffffffff;
+	static const unsigned int INFINITE_MTU = 0xffffffff;
 	struct icmphdr *out_icmp;
 	struct icmp6hdr const *in_icmp;
 	struct net_device const *in_dev;
@@ -2083,9 +2083,9 @@ static int icmp64_compute_mtu4(struct xlation const *state)
 	out_icmp = icmp_hdr(state->out);
 	in_icmp = icmp6_hdr(state->in);
 	in_dev = state->in->dev;
-	in_mtu = in_dev ? in_dev->mtu : INFINITE;
+	in_mtu = in_dev ? in_dev->mtu : INFINITE_MTU;
 	out_dst = skb_dst(state->out);
-	out_mtu = out_dst ? dst_mtu(out_dst) : INFINITE;
+	out_mtu = out_dst ? dst_mtu(out_dst) : INFINITE_MTU;
 
 	log_debug("Packet MTU: %u", be32_to_cpu(in_icmp->icmp6_mtu));
 	log_debug("In dev MTU: %u", in_mtu);
