@@ -469,7 +469,7 @@ static int iphdr_delta(struct iphdr *hdr)
  * Please note that there is no guarantee that delta will be positive. If the
  * IPv4 header has lots of options, it might exceed the IPv6 header length.
  */
-static int get_delta(struct sk_buff *in)
+static int ttp46_get_delta(struct sk_buff *in)
 {
 	struct iphdr *hdr4;
 	int delta;
@@ -503,7 +503,7 @@ static int get_delta(struct sk_buff *in)
 	return delta;
 }
 
-static unsigned int fragment_exceeds_mtu46(struct sk_buff *in)
+static unsigned int ttp46_fragment_exceeds_mtu(struct sk_buff *in)
 {
 	struct skb_shared_info *shinfo;
 	unsigned int headers;
@@ -552,7 +552,7 @@ include_headers:
 	return headers + payload;
 }
 
-static int ttp46_allocate_fast(struct xlation *state, bool ignore_df,
+static int ttp46_alloc_fast(struct xlation *state, bool ignore_df,
 			 unsigned short gso_size)
 {
 	struct sk_buff *in = state->in;
@@ -563,7 +563,7 @@ static int ttp46_allocate_fast(struct xlation *state, bool ignore_df,
 	int delta;
 
 	/* Dunno what happens when headroom is negative, so don't risk it. */
-	delta = get_delta(in);
+	delta = ttp46_get_delta(in);
 	if (delta < 0)
 		delta = 0;
 
@@ -630,7 +630,7 @@ static int ttp46_allocate_fast(struct xlation *state, bool ignore_df,
 	return 0;
 }
 
-static int ttp46_allocate_slow(struct xlation *state, unsigned int mpl)
+static int ttp46_alloc_slow(struct xlation *state, unsigned int mpl)
 {
 	struct sk_buff *in;
 	struct sk_buff **previous;
@@ -846,10 +846,10 @@ static int ttp46_alloc_skb(struct xlation *state)
 		 * ICMP error means the fragment header will never be added,
 		 * so Fast Path is always viable.
 		 */
-		return ttp46_allocate_fast(state, false, 0);
+		return ttp46_alloc_fast(state, false, 0);
 	}
 
-	out_len = fragment_exceeds_mtu46(in);
+	out_len = ttp46_fragment_exceeds_mtu(in);
 
 	if (is_df_set(ip_hdr(in))) {
 		/*
@@ -863,7 +863,7 @@ static int ttp46_alloc_skb(struct xlation *state)
 					 ICMP_FRAG_NEEDED,
 					 max(576u, nexthop_mtu - 20u));
 		} else {
-			return ttp46_allocate_fast(state, in->ignore_df,
+			return ttp46_alloc_fast(state, in->ignore_df,
 					     skb_shinfo(in)->gso_size);
 		}
 	}
@@ -873,14 +873,14 @@ static int ttp46_alloc_skb(struct xlation *state)
 		 * Force LIM and Fragmentation ID preservation through manual
 		 * fragmentation.
 		 */
-		return ttp46_allocate_slow(state, mpl);
+		return ttp46_alloc_slow(state, mpl);
 	}
 
 	/*
 	 * Dodged a bullet; no need to fragment further, we'll just
 	 * build the Fragmentation header ourselves.
 	 */
-	return ttp46_allocate_fast(state, false, 0);
+	return ttp46_alloc_fast(state, false, 0);
 }
 
 /*
@@ -939,7 +939,7 @@ static inline __be32 build_id_field(struct iphdr *hdr4)
  * Copies the IPv6 and fragment headers from the first fragment to the
  * subsequent ones, adapting fields appropriately.
  */
-static void autofill_hdr6(struct sk_buff *first)
+static void ttp46_autofill_hdr6(struct sk_buff *first)
 {
 	struct sk_buff *skb;
 	struct ipv6hdr *hdr6;
@@ -1041,7 +1041,7 @@ static int ttp46_ipv6_external(struct xlation *state)
 	if (error)
 		return error;
 
-	autofill_hdr6(out); //< slow path
+	ttp46_autofill_hdr6(out); //< slow path
 	return 0;
 }
 
@@ -1100,7 +1100,7 @@ static __be32 icmp6_min_mtu(struct xlation *state, unsigned int pkt_mtu,
 	return cpu_to_be32(result);
 }
 
-static int compute_mtu6(struct xlation *state)
+static int icmp46_compute_mtu6(struct xlation *state)
 {
 	/* Meant for hairpinning and unit tests. */
 	static const unsigned int INFINITE = 0xffffffff;
@@ -1141,7 +1141,7 @@ static int compute_mtu6(struct xlation *state)
  * One-liner for translating "Destination Unreachable" messages from ICMPv4 to
  * ICMPv6.
  */
-static int icmp4_to_icmp6_dest_unreach(struct xlation *state)
+static int icmp46_dest_unreach(struct xlation *state)
 {
 	struct icmphdr *in = icmp_hdr(state->in);
 	struct icmp6hdr *out = icmp6_hdr(state->out);
@@ -1169,7 +1169,7 @@ static int icmp4_to_icmp6_dest_unreach(struct xlation *state)
 		return 0;
 
 	case ICMP_FRAG_NEEDED:
-		return compute_mtu6(state);
+		return icmp46_compute_mtu6(state);
 	}
 
 	/* Dead code */
@@ -1459,7 +1459,7 @@ static int ttp46_icmp(struct xlation *state)
 			goto fail;
 		}
 
-		error = icmp4_to_icmp6_dest_unreach(state);
+		error = icmp46_dest_unreach(state);
 		if (error)
 			return error;
 		return icmp46_post_icmp6error(state);
@@ -1764,7 +1764,7 @@ static __u8 nexthdr2proto(__u8 nexthdr)
 /*
  * One-liner for creating the IPv4 header's Protocol field.
  */
-static __u8 xlat_proto(struct ipv6hdr const *hdr6)
+static __u8 xlat64_proto(struct ipv6hdr const *hdr6)
 {
 	struct hdr_iterator iterator = HDR_ITERATOR_INIT(hdr6);
 	hdr_iterator_last(&iterator);
@@ -1913,8 +1913,8 @@ static int ttp64_alloc_skb(struct xlation *state)
  * Note, because of __ip_select_ident(), the following fields need to be already
  * set: hdr4->saddr, hdr4->daddr, hdr4->protocol.
  */
-static void generate_ipv4_id(struct xlation const *state, struct iphdr *hdr4,
-			     struct frag_hdr const *hdr_frag)
+static void xlat64_generate_id(struct xlation const *state, struct iphdr *hdr4,
+			      struct frag_hdr const *hdr_frag)
 {
 	if (hdr_frag)
 		hdr4->id = cpu_to_be16(be32_to_cpu(hdr_frag->identification));
@@ -1922,7 +1922,7 @@ static void generate_ipv4_id(struct xlation const *state, struct iphdr *hdr4,
 		__ip_select_ident(state->ns, hdr4, 1);
 }
 
-static bool generate_df_flag(struct xlation const *state)
+static bool xlat64_generate_df_flag(struct xlation const *state)
 {
 	struct sk_buff const *in = state->in;
 	struct sk_buff const *out = state->out;
@@ -1953,8 +1953,8 @@ static bool generate_df_flag(struct xlation const *state)
 	return out->len > 1260;
 }
 
-static __be16 xlat_frag_off(struct frag_hdr const *hdr_frag,
-			    struct xlation const *state)
+static __be16 xlat64_frag_off(struct frag_hdr const *hdr_frag,
+			      struct xlation const *state)
 {
 	bool df;
 	__u16 mf;
@@ -1965,7 +1965,7 @@ static __be16 xlat_frag_off(struct frag_hdr const *hdr_frag,
 		mf = is_mf_set_ipv6(hdr_frag);
 		frag_offset = get_v6_frag_offset(hdr_frag);
 	} else {
-		df = generate_df_flag(state);
+		df = xlat64_generate_df_flag(state);
 		mf = 0;
 		frag_offset = 0;
 	}
@@ -1978,7 +1978,7 @@ static __be16 xlat_frag_off(struct frag_hdr const *hdr_frag,
  * Only used for external IPv6 headers. (ie. not enclosed in ICMP errors.)
  * RFC 7915 sections 5.1 and 5.1.1.
  */
-static int ttp64_ipv4_external(struct xlation *state)
+static int ttp64_ip_external(struct xlation *state)
 {
 	struct frag_hdr const *hdr_frag;
 	struct iphdr *hdr4;
@@ -2009,16 +2009,16 @@ static int ttp64_ipv4_external(struct xlation *state)
 	hdr4->ihl = 5;
 	hdr4->tos = get_traffic_class(ipv6_hdr(state->in));
 	hdr4->tot_len = cpu_to_be16(state->out->len);
-	hdr4->frag_off = xlat_frag_off(hdr_frag, state);
 	hdr4->ttl = ipv6_hdr(state->in)->hop_limit - 1;
 	hdr4->protocol = JOOL_CB(state->out)->l4_proto;
+	hdr4->frag_off = xlat64_frag_off(hdr_frag, state);
 
 	error = siit64_addrs(state, &hdr4->saddr, &hdr4->daddr);
 	if (error)
 		return error;
 
 	hdr4->id = 0;
-	generate_ipv4_id(state, hdr4, hdr_frag);
+	xlat64_generate_id(state, hdr4, hdr_frag);
 
 	hdr4->check = 0;
 	hdr4->check = ip_fast_csum(hdr4, hdr4->ihl);
@@ -2027,9 +2027,9 @@ static int ttp64_ipv4_external(struct xlation *state)
 }
 
 /*
- * Same as ttp64_ipv4_external(), except only used on internal headers.
+ * Same as ttp64_ip_external(), except only used on internal headers.
  */
-static int ttp64_ipv4_internal(struct xlation *state)
+static int ttp64_ip_internal(struct xlation *state)
 {
 	struct sk_buff const *in = state->in;
 	struct sk_buff *out = state->out;
@@ -2044,15 +2044,16 @@ static int ttp64_ipv4_internal(struct xlation *state)
 	hdr4->tot_len = cpu_to_be16(get_tot_len_ipv6(in) -
 				    pkt_hdrs_len(in) +
 				    pkt_hdrs_len(out));
-	hdr4->frag_off = xlat_frag_off(hdr_frag, state);
+	hdr4->frag_off = xlat64_frag_off(hdr_frag, state);
 	hdr4->ttl = hdr6->hop_limit;
-	hdr4->protocol = xlat_proto(hdr6);
+	hdr4->protocol = xlat64_proto(hdr6);
 
 	error = siit64_addrs(state, &hdr4->saddr, &hdr4->daddr);
 	if (error)
 		return error;
 
-	generate_ipv4_id(state, hdr4, hdr_frag);
+	hdr4->id = 0;
+	xlat64_generate_id(state, hdr4, hdr_frag);
 
 	hdr4->check = 0;
 	hdr4->check = ip_fast_csum(hdr4, hdr4->ihl);
@@ -2069,7 +2070,7 @@ static __be16 minimum(unsigned int mtu1, unsigned int mtu2, unsigned int mtu3)
 	return cpu_to_be16(min(mtu1, min(mtu2, mtu3)));
 }
 
-static int compute_mtu4(struct xlation const *state)
+static int icmp64_compute_mtu4(struct xlation const *state)
 {
 	/* Meant for unit tests. */
 	static const unsigned int INFINITE = 0xffffffff;
@@ -2102,7 +2103,7 @@ static int compute_mtu4(struct xlation const *state)
  * One liner for translating the ICMPv6's pointer field to ICMPv4.
  * "Pointer" is a field from "Parameter Problem" ICMP messages.
  */
-static int icmp6_to_icmp4_param_prob_ptr(struct xlation *state)
+static int icmp64_param_prob_ptr(struct xlation *state)
 {
 	struct icmp6hdr const *icmpv6_hdr = icmp6_hdr(state->in);
 	struct icmphdr *icmpv4_hdr = icmp_hdr(state->out);
@@ -2159,14 +2160,14 @@ failure:
 /*
  * One-liner for translating "Parameter Problem" messages from ICMPv6 to ICMPv4.
  */
-static int icmp6_to_icmp4_param_prob(struct xlation *state)
+static int icmp64_param_prob(struct xlation *state)
 {
 	struct icmp6hdr const *icmpv6_hdr = icmp6_hdr(state->in);
 	struct icmphdr *icmpv4_hdr = icmp_hdr(state->out);
 
 	switch (icmpv6_hdr->icmp6_code) {
 	case ICMPV6_HDR_FIELD:
-		return icmp6_to_icmp4_param_prob_ptr(state);
+		return icmp64_param_prob_ptr(state);
 
 	case ICMPV6_UNK_NEXTHDR:
 		icmpv4_hdr->icmp4_unused = 0;
@@ -2320,7 +2321,7 @@ static int icmp64_post_icmp4error(struct xlation *state, bool squeeze_extensions
 	if (error)
 		return error;
 
-	error = ttp64_ipv4_internal(state);
+	error = ttp64_ip_internal(state);
 	if (error)
 		goto restore_outer;
 
@@ -2421,7 +2422,7 @@ static int ttp64_icmp(struct xlation *state)
 		outhdr->type = ICMP_DEST_UNREACH;
 		outhdr->code = ICMP_FRAG_NEEDED;
 		outhdr->un.frag.__unused = 0;
-		error = compute_mtu4(state);
+		error = icmp64_compute_mtu4(state);
 		if (error)
 			return error;
 		return icmp64_post_icmp4error(state, false);
@@ -2439,7 +2440,7 @@ static int ttp64_icmp(struct xlation *state)
 		default:
 			goto fail;
 		}
-		error = icmp6_to_icmp4_param_prob(state);
+		error = icmp64_param_prob(state);
 		if (error)
 			return error;
 		return icmp64_post_icmp4error(state, false);
@@ -2655,7 +2656,7 @@ static void ipxlat_xlat_64(struct xlation *state, struct sk_buff *in)
 	if ((err = ttp64_alloc_skb(state)) != 0)
 		goto fail;
 
-	if ((err = ttp64_ipv4_external(state)) != 0)
+	if ((err = ttp64_ip_external(state)) != 0)
 		goto fail;
 
 	if (is_first_frag6(pkt_frag_hdr(state->in)) && (err = ipxlat_xlat_64_l4(state)) != 0)
