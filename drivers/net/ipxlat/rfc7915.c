@@ -998,7 +998,7 @@ static int ttcp46_ipv6_common(struct xlation *state)
 	hdr6->flow_lbl[2] = 0;
 	/* hdr6->payload_len */
 	/* hdr6->nexthdr */
-	if (pkt_is_outer(in)) {
+	if (!pkt_is_inner(in)) {
 		if (hdr4->ttl <= 1) {
 			log_debug("Packet's TTL <= 1.");
 			return drop_icmp(state, ICMP_TIME_EXCEEDED,
@@ -1034,7 +1034,7 @@ static int ttp46_ipv6_external(struct xlation *state)
 	struct ipv6hdr *hdr6 = ipv6_hdr(out);
 	int error;
 
-	if (pkt_is_outer(in) && has_unexpired_src_route(ip_hdr(in))) {
+	if (!pkt_is_inner(in) && has_unexpired_src_route(ip_hdr(in))) {
 		log_debug("Packet has an unexpired source route.");
 		return drop_icmp(state, ICMP_DEST_UNREACH, ICMP_SR_FAILED, 0);
 	}
