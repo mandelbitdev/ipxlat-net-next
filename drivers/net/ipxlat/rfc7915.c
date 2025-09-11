@@ -1176,8 +1176,8 @@ static int icmp46_dest_unreach(struct xlation *state)
 		return 0;
 
 	case ICMP_PROT_UNREACH:
-		out->icmp6_pointer = cpu_to_be32(offsetof(struct ipv6hdr,
-								nexthdr));
+		out->icmp6_pointer =
+			cpu_to_be32(offsetof(struct ipv6hdr, nexthdr));
 		return 0;
 
 	case ICMP_FRAG_NEEDED:
