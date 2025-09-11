@@ -222,11 +222,6 @@ static inline bool pkt_is_inner(struct sk_buff const *skb)
 	return JOOL_CB(skb)->is_inner;
 }
 
-static inline bool pkt_is_outer(struct sk_buff const *skb)
-{
-	return !pkt_is_inner(skb);
-}
-
 static inline unsigned int skb_l3hdr_len(struct sk_buff const *skb)
 {
 	return skb_transport_header(skb) - skb_network_header(skb);
