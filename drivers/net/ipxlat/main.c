@@ -39,9 +39,9 @@ static struct jool_globals cfg = {
 
 	.lowest_ipv6_mtu = 1280,
 	.plateaus.values = {
-		65535, 32000, 17914, 8166, 4352, 2002, 1492, 1006, 508, 296, 68
+		65535, 32000, 17914, 8166, 4352, 2002, 1492,
 	},
-	.plateaus.count = 11,
+	.plateaus.count = 7,
 	.compute_udp_csum_zero = false,
 };
 
