@@ -448,17 +448,6 @@ static int squeeze_icmp_extensions_common(
 		out_ipl, out_pad, out_iel);
 }
 
-static void skb_cleanup_copy(struct sk_buff *skb)
-{
-	/* https://github.com/NICMx/Jool/issues/289 */
-	nf_reset_ct(skb);
-
-	/* https://github.com/NICMx/Jool/issues/400 */
-	skb_clear_tstamp(skb);
-
-//	skb_dst_drop(skb);
-}
-
 static __u8 proto2nexthdr(__u8 proto)
 {
 	return (proto == IPPROTO_ICMP) ? NEXTHDR_ICMP : proto;
@@ -585,8 +574,8 @@ static int ttp46_alloc_fast(struct xlation *state, bool ignore_df,
 	}
 	state->out = out;
 
-	skb_cleanup_copy(out); // TODO: resets nfc tstamp, probably not
-			       // needed anymore?
+	skb_scrub_packet(out, 0);
+	//skb_cleanup_copy(out);
 
 	/* Remove outer l3 and l4 headers from the copy. */
 	skb_pull(out, pkt_hdrs_len(in));
@@ -1879,7 +1868,8 @@ static int ttp64_alloc_skb(struct xlation *state)
 	}
 	state->out = out;
 
-	skb_cleanup_copy(out);
+	skb_scrub_packet(out, 0);
+	//skb_cleanup_copy(out);
 
 	/* Remove outer l3 and l4 headers from the copy. */
 	skb_pull(out, pkt_hdrs_len(in));
