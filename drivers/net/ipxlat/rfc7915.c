@@ -1046,13 +1046,18 @@ static int ttp46_ipv6_external(struct xlation *state)
 	return 0;
 }
 
+static u8 xlat46_proto2nexthdr(u8 protocol)
+{
+	return (protocol == IPPROTO_ICMP) ? NEXTHDR_ICMP : protocol;
+}
+
 static int ttp46_ipv6_internal(struct xlation *state)
 {
 	struct sk_buff *in = state->in;
 	struct sk_buff *out = state->out;
 	struct ipv6hdr *hdr6 = ipv6_hdr(out);
 
-	hdr6->nexthdr = JOOL_CB(out)->l4_proto;
+	hdr6->nexthdr = xlat46_proto2nexthdr(JOOL_CB(out)->l4_proto);
 	/*
 	 * The RFC formula is fine, but this avoids the need to handle
 	 * differently depending on whether we're adding a fragment header.
