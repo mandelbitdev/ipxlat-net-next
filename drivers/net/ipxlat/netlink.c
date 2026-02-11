@@ -103,7 +103,8 @@ void ipxlat_nl_post_doit(const struct genl_split_ops *ops, struct sk_buff *skb,
 }
 
 static int ipxl_nl_send_dev(struct sk_buff *skb, const struct ipxl_priv *ipxl,
-			    const u32 portid, const u32 seq, int flags)
+			    struct net *src_net, const u32 portid,
+			    const u32 seq, int flags)
 {
 	struct nlattr *attr_cfg, *attr_pool;
 	struct ipxl_cfg cfg_snapshot;
@@ -129,8 +130,8 @@ static int ipxl_nl_send_dev(struct sk_buff *skb, const struct ipxl_priv *ipxl,
 	if (nla_put_u32(skb, IPXLAT_A_DEV_IFINDEX, ipxl->dev->ifindex))
 		goto err;
 
-	if (!net_eq(sock_net(skb->sk), dev_net(ipxl->dev))) {
-		id = peernet2id_alloc(sock_net(skb->sk), dev_net(ipxl->dev),
+	if (!net_eq(src_net, dev_net(ipxl->dev))) {
+		id = peernet2id_alloc(src_net, dev_net(ipxl->dev),
 				      GFP_ATOMIC);
 		if (id < 0) {
 			ret = id;
@@ -185,8 +186,8 @@ int ipxlat_nl_dev_get_doit(struct sk_buff *skb, struct genl_info *info)
 	if (!reply)
 		return -ENOMEM;
 
-	ret = ipxl_nl_send_dev(reply, ctx->ipxl, info->snd_portid,
-			       info->snd_seq, 0);
+	ret = ipxl_nl_send_dev(reply, ctx->ipxl, genl_info_net(info),
+			       info->snd_portid, info->snd_seq, 0);
 	if (ret < 0) {
 		nlmsg_free(reply);
 		return ret;
@@ -211,7 +212,7 @@ int ipxlat_nl_dev_get_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
 		netdev_hold(dev, &tracker, GFP_ATOMIC);
 		rcu_read_unlock();
 
-		ret = ipxl_nl_send_dev(skb, netdev_priv(dev),
+		ret = ipxl_nl_send_dev(skb, netdev_priv(dev), net,
 				       NETLINK_CB(cb->skb).portid,
 				       cb->nlh->nlmsg_seq, NLM_F_MULTI);
 

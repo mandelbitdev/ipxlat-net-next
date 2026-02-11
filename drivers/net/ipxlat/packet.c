@@ -27,7 +27,8 @@ static int ipxl_v6_l4hdr_len(struct sk_buff *skb, unsigned int l4_offset,
 	struct icmp6hdr icmp_buf, *icmp;
 	struct tcphdr tcp_buf, *tcp;
 
-	*has_inner = false;
+	if (has_inner)
+		*has_inner = false;
 
 	switch (l4_proto) {
 	case NEXTHDR_TCP:

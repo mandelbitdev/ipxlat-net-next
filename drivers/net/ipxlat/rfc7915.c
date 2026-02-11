@@ -404,7 +404,11 @@ static int ipxl_finalize_offload_46(struct sk_buff *skb, __u8 l4_proto,
 	case IPPROTO_UDP:
 		break;
 	case IPPROTO_ICMP:
-		return -EOPNOTSUPP;
+		/* ICMP has no GSO transform here; keep packet and clear stale
+		 * offload metadata so the stack treats it as a normal frame.
+		 */
+		skb_gso_reset(skb);
+		break;
 	default:
 		return -EPROTONOSUPPORT;
 	}
@@ -452,7 +456,11 @@ static int ipxl_finalize_offload_64(struct sk_buff *skb, __u8 l4_proto,
 	case IPPROTO_UDP:
 		break;
 	case IPPROTO_ICMP:
-		return -EOPNOTSUPP;
+		/* ICMP has no GSO transform here; keep packet and clear stale
+		 * offload metadata so the stack treats it as a normal frame.
+		 */
+		skb_gso_reset(skb);
+		break;
 	default:
 		return -EPROTONOSUPPORT;
 	}
@@ -584,7 +592,32 @@ static int ipxl_icmp6_to_icmp4_info_type_code(const struct icmp6hdr *in,
 	}
 }
 
-static int ipxl_icmp6_to_icmp4_info(struct sk_buff *skb)
+static __sum16 ipxl_icmp6_to_icmp4_info_csum(const struct ipv6hdr *in6,
+					     const struct icmp6hdr *in_icmp6,
+					     const struct icmphdr *out_icmp4,
+					     unsigned int l4_len)
+{
+	struct icmp6hdr icmp6_zero;
+	struct icmphdr icmp4_zero;
+	__wsum csum, tmp;
+
+	icmp6_zero = *in_icmp6;
+	icmp6_zero.icmp6_cksum = 0;
+	icmp4_zero = *out_icmp4;
+	icmp4_zero.checksum = 0;
+
+	csum = ~csum_unfold(in_icmp6->icmp6_cksum);
+	tmp = ~csum_unfold(csum_ipv6_magic(&in6->saddr, &in6->daddr, l4_len,
+					   NEXTHDR_ICMP, 0));
+	csum = csum_sub(csum, tmp);
+	csum = csum_sub(csum, csum_partial(&icmp6_zero, sizeof(icmp6_zero), 0));
+	csum = csum_add(csum, csum_partial(&icmp4_zero, sizeof(icmp4_zero), 0));
+
+	return csum_fold(csum);
+}
+
+static int ipxl_icmp6_to_icmp4_info(struct sk_buff *skb,
+				    const struct ipv6hdr *in6)
 {
 	struct icmp6hdr ic6_copy, *ic6;
 	struct icmphdr *ic4;
@@ -598,7 +631,9 @@ static int ipxl_icmp6_to_icmp4_info(struct sk_buff *skb)
 	if (unlikely(err))
 		return err;
 
-	ipxl_compute_icmp4_csum(skb);
+	ic4->checksum = ipxl_icmp6_to_icmp4_info_csum(in6, &ic6_copy, ic4,
+						       skb_datagram_len(skb));
+	skb->ip_summed = CHECKSUM_NONE;
 	return 0;
 }
 
@@ -667,13 +702,12 @@ static __be16 ipxl_icmp64_compute_mtu4(const struct ipxl_pkt_ctx *ctx,
 				       const struct sk_buff *skb,
 				       const struct icmp6hdr *ic6)
 {
-	static const unsigned int infinite_mtu = U32_MAX;
 	unsigned int in_mtu, out_mtu, pkt_mtu;
 	const struct dst_entry *out_dst;
 
 	out_dst = skb_dst(skb);
 	in_mtu = ctx->dev->mtu;
-	out_mtu = out_dst ? dst_mtu(out_dst) : infinite_mtu;
+	out_mtu = out_dst ? dst_mtu(out_dst) : ctx->dev->mtu;
 
 	/* RFC7915 §5.2:
 	 * min((PTB_mtu - 20), mtu4_nexthop, (mtu6_nexthop - 20))
@@ -991,13 +1025,14 @@ static int ipxl_icmp6_to_icmp4_error(const struct ipxl_pkt_ctx *ctx,
 
 static int ipxl_icmp6_to_icmp4(const struct ipxl_pkt_ctx *ctx,
 			       struct sk_buff *skb, bool is_err,
-			       const struct icmp6hdr *ic6_copy)
+			       const struct icmp6hdr *ic6_copy,
+			       const struct ipv6hdr *in6)
 {
 	if (unlikely(is_err)) {
 		return ipxl_icmp6_to_icmp4_error(ctx, skb, ic6_copy);
 	}
 
-	return ipxl_icmp6_to_icmp4_info(skb);
+	return ipxl_icmp6_to_icmp4_info(skb, in6);
 }
 
 static __be16 ipxl_v6_to_v4_frag_off(struct sk_buff *skb,
@@ -1121,14 +1156,19 @@ static int ipxl_v6_to_v4_inplace(const struct ipxl_pkt_ctx *ctx,
 		err = ipxl_udp6_to_udp4(skb, &in6, false);
 		break;
 	case IPPROTO_ICMP:
-		err = ipxl_icmp6_to_icmp4(ctx, skb, is_icmp6_err, &ic6_copy);
+		err = ipxl_icmp6_to_icmp4(ctx, skb, is_icmp6_err, &ic6_copy,
+					  &in6);
 		break;
 	default:
 		err = 0;
 		break;
 	}
-	if (unlikely(err))
+	if (unlikely(err)) {
+		netdev_info(ctx->dev,
+			    "4->6: l4 translation failed proto=%u err=%d\n",
+			    l4_proto, err);
 		return err;
+	}
 
 out:
 	return ipxl_finalize_offload_64(skb, out_l4_proto,
@@ -1496,7 +1536,7 @@ static int ipxl_icmp46_compute_mtu6(const struct ipxl_pkt_ctx *ctx,
 	in_mtu = ctx->dev->mtu;
 	dst = skb_dst(skb);
 	/* MTU of IPv6 nexthop */
-	out_mtu = dst ? dst_mtu(dst) : U32_MAX;
+	out_mtu = dst ? dst_mtu(dst) : ctx->dev->mtu;
 	out_icmp->icmp6_mtu =
 		/* in_icmp->un.frag.mtu is the MTU value carried by incoming ICMPv4 Frag Needed */
 		ipxl_icmp6_min_mtu(ctx, be16_to_cpu(in_icmp->un.frag.mtu),
@@ -1587,6 +1627,9 @@ static int ipxl_icmp4_to_icmp6_info(struct sk_buff *skb,
 				    struct icmp6hdr *icmp6, unsigned int l4_off,
 				    bool inner)
 {
+	struct icmp6hdr icmp6_zero;
+	struct icmphdr icmp4_zero;
+	__wsum csum;
 	int err;
 
 	err = ipxl_icmp4_to_icmp6_info_type_code(icmp4, icmp6);
@@ -1601,15 +1644,16 @@ static int ipxl_icmp4_to_icmp6_info(struct sk_buff *skb,
 							   icmp6_cksum));
 	}
 
-	/* We can't use the incremental update model used for TCP and UDP here
-	 * as we're moving from "no pseudoheader" (ICMPv4 csum) to "with
-	 * pseudoheader" (ICMPv6 csum) and changing protocol semantics at the
-	 * same time.
-	 */
-	icmp6->icmp6_cksum = 0;
-	icmp6->icmp6_cksum = ipxl_l4_csum_ipv6(&ip6->saddr, &ip6->daddr, skb,
-					       l4_off, skb->len - l4_off,
-					       IPPROTO_ICMPV6);
+	icmp4_zero = *icmp4;
+	icmp4_zero.checksum = 0;
+	icmp6_zero = *icmp6;
+	icmp6_zero.icmp6_cksum = 0;
+	csum = ~csum_unfold(icmp4->checksum);
+	csum = csum_sub(csum, csum_partial(&icmp4_zero, sizeof(icmp4_zero), 0));
+	csum = csum_add(csum, csum_partial(&icmp6_zero, sizeof(icmp6_zero), 0));
+	icmp6->icmp6_cksum = csum_ipv6_magic(&ip6->saddr, &ip6->daddr,
+					     skb->len - l4_off,
+					     IPPROTO_ICMPV6, csum);
 
 	/* on the outer header don't interpret csum metadata
 	 * as offload/accumulator state anymore
@@ -1856,7 +1900,7 @@ static int ipxl_icmp4_to_icmp6(const struct ipxl_pkt_ctx *ctx,
 {
 	const struct icmphdr icmp4 = *icmp_hdr(skb);
 
-	if (unlikely(ipxl_skb_cb(skb)->flags & IPXLAT_SKB_F_ICMP_ERR))
+	if (unlikely(ipxl_skb_cb(skb)->flags & IPXLAT_SKB_F_ICMP4_ERR))
 		return ipxl_icmp4_to_icmp6_error(ctx, skb);
 
 	return ipxl_icmp4_to_icmp6_info(skb, &icmp4, ipv6_hdr(skb),
@@ -1886,8 +1930,7 @@ static int ipxl_v4_to_v6_inplace(const struct ipxl_pkt_ctx *ctx,
 	need_frag = ip_is_fragment(&in4);
 
 	/* evaluate IPv6 size against PMTU and local threshold policy */
-	pmtu6 = skb_valid_dst(skb) ? dst_mtu(skb_dst(skb)) :
-				     ctx->cfg->lowest_ipv6_mtu;
+	pmtu6 = skb_valid_dst(skb) ? dst_mtu(skb_dst(skb)) : ctx->dev->mtu;
 	pkt_len6 = tot_len4 + 20;
 	/* RFC7915 §4.1:
 	 * If the DF bit is set and the MTU of the next-hop interface is less
