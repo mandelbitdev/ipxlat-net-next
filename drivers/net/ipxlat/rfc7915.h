@@ -8,9 +8,11 @@
 #ifndef MOD_XLAT_RFC7915_H_
 #define MOD_XLAT_RFC7915_H_
 
-struct xlation;
+struct ipxl_pkt_ctx;
 struct sk_buff;
 
-void jool_xlat(struct xlation *state, struct sk_buff *in);
+enum ipxl_xlat_action ipxl_xlat(const struct ipxl_pkt_ctx *ctx,
+				struct sk_buff *skb);
+int ipxl_emit_icmp_error(const struct ipxl_pkt_ctx *ctx, struct sk_buff *inner);
 
 #endif /* MOD_XLAT_RFC7915_H_ */

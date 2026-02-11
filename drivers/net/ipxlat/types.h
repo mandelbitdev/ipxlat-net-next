@@ -37,11 +37,12 @@ struct ipv6_prefix {
 /*
  * A copy of the entire running configuration, excluding databases.
  */
-struct jool_globals {
+struct ipxl_cfg {
 	struct ipv6_prefix pool6;
 
 	struct in6_addr pool6791v6;
 	struct in_addr pool6791v4;
+	struct in6_addr icmp6err_saddr;
 
 	/*
 	 * Smallest reachable IPv6 MTU.

@@ -8,35 +8,35 @@
 #ifndef _NET_SIIT_TRANSLATION_STATE_H_
 #define _NET_SIIT_TRANSLATION_STATE_H_
 
+#include <linux/mutex.h>
+#include <linux/rcupdate.h>
 #include <uapi/linux/if_link.h>
+#include <net/gro_cells.h>
 
 #include "packet.h"
+#include "types.h"
 
-struct xlation_result {
-	__u8 set;
-	__u8 type;
-	__u8 code;
-	__u32 info;
+struct ipxl_priv {
+	struct net_device *dev;
+	/* Datapath readers use RCU, netlink writers serialize with cfg_lock. */
+	struct ipxl_cfg __rcu *cfg;
+	struct mutex cfg_lock;
+	struct gro_cells gro_cells;
+	atomic64_t dropped;
 };
 
-/*
- * State of the current translation.
- */
-struct xlation {
-	struct net *ns; /* TODO maybe not needed anymore? use dev instead */
-	struct net_device *dev; /* Easy pointer for the Jool device. */
-
-	struct jool_globals *cfg;
-
-	/* The original packet. */
-	struct sk_buff *in;
-	/* The translated version of @in. */
-	struct sk_buff *out;
-
-	struct xlation_result result;
+struct ipxl_pkt_ctx {
+	struct net_device *dev;
+	const struct ipxl_cfg *cfg;
 };
 
-int drop(struct xlation *state);
-int drop_icmp(struct xlation *state, __u8 type, __u8 code, __u32 info);
+enum ipxl_xlat_action {
+	IPXL_XLAT_ACT_DROP = 0,
+	IPXL_XLAT_ACT_FWD,
+	IPXL_XLAT_ACT_ICMP_ERR,
+};
+
+int ipxl_drop_icmp(const struct ipxl_pkt_ctx *ctx, struct sk_buff *skb,
+		   __u8 type, __u8 code, __u32 info);
 
 #endif /* _NET_SIIT_TRANSLATION_STATE_H_ */

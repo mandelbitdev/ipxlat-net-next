@@ -6,10 +6,13 @@
  */
 
 #include <linux/module.h>
-#include <linux/ioctl.h>
+#include <linux/slab.h>
 #include <linux/version.h>
 
 #include "log.h"
+#include "address.h"
+#include "main.h"
+#include "netlink.h"
 #include "rfc7915.h"
 #include "translation_state.h"
 
@@ -19,18 +22,7 @@ MODULE_LICENSE("GPL v2");
 
 #define DRV_NAME "ipxlat"
 
-/* Inherited from veth, unused placeholder for now. */
-struct ipxlat_priv {
-	atomic64_t		dropped;
-};
-
-#define JCMD_POOL6		(SIOCDEVPRIVATE + 1)
-#define JCMD_POOL6791V4		(SIOCDEVPRIVATE + 2)
-#define JCMD_POOL6791V6		(SIOCDEVPRIVATE + 3)
-#define JCMD_LI6M		(SIOCDEVPRIVATE + 4)
-#define JCMD_AUCZ		(SIOCDEVPRIVATE + 5)
-
-static struct jool_globals cfg = {
+static const struct ipxl_cfg ipxl_cfg_defaults = {
 	/* 64:ff9b::/96 */
 	.pool6.addr.s6_addr32[0] = htonl(0x0064ff9b),
 	.pool6.len = 96,
@@ -45,49 +37,112 @@ static struct jool_globals cfg = {
 	.compute_udp_csum_zero = false,
 };
 
-static int ipxlat_open(struct net_device *dev)
+static int ipxl_open(struct net_device *dev)
 {
 	netif_start_queue(dev);
 	return 0;
 }
 
-static int ipxlat_stop(struct net_device *dev)
+static int ipxl_stop(struct net_device *dev)
 {
 	netif_stop_queue(dev);
 	return 0;
 }
 
-static void send_packet(struct sk_buff *skb, struct net_device *dev)
+static int ipxl_dev_init(struct net_device *dev)
+{
+	struct ipxl_priv *ipxl = netdev_priv(dev);
+	struct ipxl_cfg *cfg;
+	int err;
+
+	cfg = kmemdup(&ipxl_cfg_defaults, sizeof(*cfg), GFP_KERNEL);
+	if (unlikely(!cfg))
+		return -ENOMEM;
+
+	ipxl_cfg_refresh_derived(cfg);
+	rcu_assign_pointer(ipxl->cfg, cfg);
+
+	err = gro_cells_init(&ipxl->gro_cells, dev);
+	if (unlikely(err)) {
+		RCU_INIT_POINTER(ipxl->cfg, NULL);
+		kfree(cfg);
+		return err;
+	}
+
+	return 0;
+}
+
+static void ipxl_dev_uninit(struct net_device *dev)
+{
+	struct ipxl_priv *ipxl = netdev_priv(dev);
+	struct ipxl_cfg *cfg;
+
+	gro_cells_destroy(&ipxl->gro_cells);
+
+	mutex_lock(&ipxl->cfg_lock);
+	cfg = rcu_dereference_protected(ipxl->cfg,
+					lockdep_is_held(&ipxl->cfg_lock));
+	RCU_INIT_POINTER(ipxl->cfg, NULL);
+	mutex_unlock(&ipxl->cfg_lock);
+
+	synchronize_rcu();
+	kfree(cfg);
+}
+
+static void ipxl_forward_pkt(struct ipxl_priv *ipxl, struct sk_buff *skb)
 {
 	struct sk_buff *next;
 
 	for (; skb != NULL; skb = next) {
 		next = skb->next;
 		skb->next = NULL;
-		skb->dev = dev;
+		skb->dev = ipxl->dev;
 		memset(skb->cb, 0, sizeof(skb->cb));
-		netif_rx(skb);
+		gro_cells_receive(&ipxl->gro_cells, skb);
 	}
 }
 
-static int ipxlat_start_xmit(struct sk_buff *in, struct net_device *dev)
+static int ipxl_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
-	struct xlation state;
+	struct ipxl_priv *ipxl = netdev_priv(dev);
+	enum ipxl_xlat_action action;
+	const struct ipxl_cfg *cfg;
+	struct ipxl_pkt_ctx ctx;
+	int err;
 
 	log_debug("Received a packet.");
 
-	memset(&state, 0, sizeof(state));
-	state.ns = dev_net(dev);
-	state.dev = dev;
-	state.cfg = &cfg;
+	rcu_read_lock();
+	cfg = rcu_dereference(ipxl->cfg);
+	if (unlikely(!cfg)) {
+		rcu_read_unlock();
+		atomic64_inc(&ipxl->dropped);
+		kfree_skb(skb);
+		return NETDEV_TX_OK;
+	}
 
-	jool_xlat(&state, in);
-	dev_kfree_skb(in);
+	ctx.dev = dev;
+	ctx.cfg = cfg;
+	action = ipxl_xlat(&ctx, skb);
+	switch (action) {
+	case IPXL_XLAT_ACT_FWD:
+		rcu_read_unlock();
+		ipxl_forward_pkt(ipxl, skb);
+		return NETDEV_TX_OK;
+	case IPXL_XLAT_ACT_ICMP_ERR:
+		err = ipxl_emit_icmp_error(&ctx, skb);
+		rcu_read_unlock();
+		if (unlikely(err))
+			atomic64_inc(&ipxl->dropped);
+		break;
+	case IPXL_XLAT_ACT_DROP:
+		rcu_read_unlock();
+		atomic64_inc(&ipxl->dropped);
+		break;
+	}
 
-	if (state.out)
-		send_packet(state.out, dev);
-
-	return 0;
+	kfree_skb(skb);
+	return NETDEV_TX_OK;
 }
 
 static __u32 addr6_get_bit(const struct in6_addr *addr, unsigned int pos)
@@ -103,112 +158,59 @@ static __u32 addr6_get_bit(const struct in6_addr *addr, unsigned int pos)
 	return quadrant & mask;
 }
 
-static int prefix6_validate(const struct ipv6_prefix *prefix)
+int ipxl_prefix6_validate(const struct ipv6_prefix *prefix)
 {
 	unsigned int i;
 
+	if (prefix->len != 32 && prefix->len != 40 && prefix->len != 48 &&
+	    prefix->len != 56 && prefix->len != 64 && prefix->len != 96) {
+		pr_err("Unsupported RFC6052 prefix length: %u.\n", prefix->len);
+		return -EINVAL;
+	}
+
 	if (prefix->len > 128) {
 		pr_err("Prefix length %u is too high.\n", prefix->len);
-		return EINVAL;
+		return -EINVAL;
 	}
 
 	for (i = prefix->len; i < 128; i++) {
 		if (addr6_get_bit(&prefix->addr, i)) {
 			pr_err("'%pI6c/%u' seems to have a suffix; please fix.\n",
-					&prefix->addr, prefix->len);
-			return EINVAL;
+			       &prefix->addr, prefix->len);
+			return -EINVAL;
 		}
 	}
 
 	return 0;
 }
 
-static int ipxlat_siocdevprivate(struct net_device *dev, struct ifreq *ifr,
-				 void __user *data, int cmd)
+void ipxl_cfg_refresh_derived(struct ipxl_cfg *cfg)
 {
-	union {
-		struct ipv6_prefix p6;
-		struct in6_addr a6;
-		struct in_addr a4;
-		uint32_t u32;
-		uint8_t u8;
-	} buf;
-	int error;
-
-	switch (cmd) {
-	case JCMD_POOL6:
-		error = copy_from_user(&buf.p6, data, sizeof(buf.p6));
-		if (error)
-			goto efault;
-		error = prefix6_validate(&buf.p6);
-		if (error)
-			return error;
-		cfg.pool6 = buf.p6;
-		log_debug("new pool6: %pI6c/%u", &cfg.pool6.addr, cfg.pool6.len);
-		return 0;
-
-	case JCMD_POOL6791V6:
-		error = copy_from_user(&buf.a6, data, sizeof(buf.a6));
-		if (error)
-			goto efault;
-		cfg.pool6791v6 = buf.a6;
-		log_debug("new pool6791v6: %pI6c", &cfg.pool6791v6);
-		return 0;
-
-	case JCMD_POOL6791V4:
-		error = copy_from_user(&buf.a4, data, sizeof(buf.a4));
-		if (error)
-			goto efault;
-		cfg.pool6791v4 = buf.a4;
-		log_debug("new pool6791v4: %pI4", &cfg.pool6791v4);
-		return 0;
-
-	case JCMD_LI6M:
-		error = copy_from_user(&buf.u32, data, sizeof(buf.u32));
-		if (error)
-			goto efault;
-		if (buf.u32 < 1280) {
-			pr_err("lowest-ipv6-mtu out of range: %u < 1280\n",
-			       buf.u32);
-			return -ERANGE;
-		}
-		cfg.lowest_ipv6_mtu = buf.u32;
-		log_debug("new lowest-ipv6-mtu: %u", cfg.lowest_ipv6_mtu);
-		return 0;
-
-	case JCMD_AUCZ:
-		error = copy_from_user(&buf.u8, data, sizeof(buf.u8));
-		if (error)
-			goto efault;
-		cfg.compute_udp_csum_zero = buf.u8;
-		log_debug("new amend-udp-checksum-zero: %u",
-			  cfg.compute_udp_csum_zero);
-		return 0;
+	if (!ipv6_addr_any(&cfg->pool6791v6)) {
+		cfg->icmp6err_saddr = cfg->pool6791v6;
+		return;
 	}
 
-	log_debug("Unrecognized ioctl.");
-	return 0;
-
-efault:
-	pr_err("copy_from_user() errored: %d\n", error);
-	return -EFAULT;
+	siit46_addr(&cfg->pool6, cfg->pool6791v4.s_addr, &cfg->icmp6err_saddr);
 }
 
-static const struct net_device_ops ipxlat_netdev_ops = {
-	.ndo_open		= ipxlat_open,
-	.ndo_stop		= ipxlat_stop,
-	.ndo_start_xmit		= ipxlat_start_xmit,
-	.ndo_siocdevprivate	= ipxlat_siocdevprivate,
+static const struct net_device_ops ipxl_netdev_ops = {
+	.ndo_init = ipxl_dev_init,
+	.ndo_uninit = ipxl_dev_uninit,
+	.ndo_open = ipxl_open,
+	.ndo_stop = ipxl_stop,
+	.ndo_start_xmit = ipxl_start_xmit,
 };
 
-static const struct device_type ipxlat_type = {
+static const struct device_type ipxl_type = {
 	.name = DRV_NAME,
 };
 
-static void ipxlat_setup(struct net_device *dev)
+static void ipxl_setup(struct net_device *dev)
 {
-	netdev_features_t feat = NETIF_F_SG | NETIF_F_FRAGLIST | \
-				 NETIF_F_HW_CSUM | NETIF_F_RXCSUM | \
+	struct ipxl_priv *ipxl = netdev_priv(dev);
+	netdev_features_t feat = NETIF_F_SG | NETIF_F_FRAGLIST |
+				 NETIF_F_HW_CSUM | NETIF_F_RXCSUM |
 				 NETIF_F_HIGHDMA | NETIF_F_GSO_SOFTWARE;
 
 	dev->type = ARPHRD_NONE;
@@ -220,15 +222,20 @@ static void ipxlat_setup(struct net_device *dev)
 	dev->hw_features |= feat;
 	dev->hw_enc_features |= feat;
 
-	dev->netdev_ops = &ipxlat_netdev_ops;
+	dev->netdev_ops = &ipxl_netdev_ops;
 	dev->needs_free_netdev = true;
 	dev->pcpu_stat_type = NETDEV_PCPU_STAT_TSTATS;
-	dev->max_mtu = IP_MAX_MTU -
-		sizeof(struct ipv6hdr) - sizeof(struct iphdr);
+	dev->max_mtu =
+		IP_MAX_MTU - sizeof(struct ipv6hdr) - sizeof(struct iphdr);
 	dev->min_mtu = IPV6_MIN_MTU;
 	dev->mtu = ETH_DATA_LEN;
 
-	SET_NETDEV_DEVTYPE(dev, &ipxlat_type);
+	SET_NETDEV_DEVTYPE(dev, &ipxl_type);
+
+	ipxl->dev = dev;
+	RCU_INIT_POINTER(ipxl->cfg, NULL);
+	mutex_init(&ipxl->cfg_lock);
+	atomic64_set(&ipxl->dropped, 0);
 }
 
 /*
@@ -244,7 +251,7 @@ static void ipxlat_setup(struct net_device *dev)
  *	dev->real_num_rx_queues: 6
  *
  * If numtxqueues/numrxqueues default, rtnl_create_link() uses
- * ipxlat_get_num_queues() to set num_tx_queues/num_rx_queues. In my quad core,
+ * ipxl_get_num_queues() to set num_tx_queues/num_rx_queues. In my quad core,
  * this results in
  *
  *	dev->num_tx_queues: 4
@@ -256,7 +263,7 @@ static void ipxlat_setup(struct net_device *dev)
  *
  * This looks like nonsense.
  */
-static int ipxlat_init_queues(struct net_device *dev, struct nlattr *tb[])
+static int ipxl_init_queues(struct net_device *dev, struct nlattr *tb[])
 {
 	int err;
 
@@ -284,7 +291,7 @@ static int ipxlat_init_queues(struct net_device *dev, struct nlattr *tb[])
 /*
  * Simplified version of veth's newlink.
  */
-static int ipxlat_newlink(struct net_device *dev,
+static int ipxl_newlink(struct net_device *dev,
 			struct rtnl_newlink_params *params,
 			struct netlink_ext_ack *extack)
 {
@@ -302,7 +309,7 @@ static int ipxlat_newlink(struct net_device *dev,
 
 	pr_info("Added device '%s'.\n", dev->name);
 
-	err = ipxlat_init_queues(dev, tb);
+	err = ipxl_init_queues(dev, tb);
 	if (err) {
 		unregister_netdevice(dev);
 		return err;
@@ -318,7 +325,7 @@ static int ipxlat_newlink(struct net_device *dev,
  * TODO If you don't add anything, probably delete this function on pr_info()
  * purge day.
  */
-static void ipxlat_dellink(struct net_device *dev, struct list_head *head)
+static void ipxl_dellink(struct net_device *dev, struct list_head *head)
 {
 	pr_info("Removing device '%s'.\n", dev->name);
 	unregister_netdevice_queue(dev, head);
@@ -327,18 +334,18 @@ static void ipxlat_dellink(struct net_device *dev, struct list_head *head)
 /*
  * Inherited from veth. Seems like a reasonable implementation.
  */
-static unsigned int ipxlat_get_num_queues(void)
+static unsigned int ipxl_get_num_queues(void)
 {
 	int queues = num_possible_cpus();
 	return (queues > 4096) ? 4096 : queues;
 }
 
-static struct rtnl_link_ops ipxlat_link_ops = {
-	.kind			= DRV_NAME,
-	.priv_size		= sizeof(struct ipxlat_priv),
-	.setup			= ipxlat_setup,
-	.newlink		= ipxlat_newlink,
-	.dellink		= ipxlat_dellink,
+static struct rtnl_link_ops ipxl_link_ops = {
+	.kind = DRV_NAME,
+	.priv_size = sizeof(struct ipxl_priv),
+	.setup = ipxl_setup,
+	.newlink = ipxl_newlink,
+	.dellink = ipxl_dellink,
 
 	/* nlargs not needed for now, so .policy and .maxtype excluded */
 
@@ -348,19 +355,37 @@ static struct rtnl_link_ops ipxlat_link_ops = {
 	 * and has no meaning in SIIT anyway.
 	 */
 
-	.get_num_tx_queues	= ipxlat_get_num_queues,
-	.get_num_rx_queues	= ipxlat_get_num_queues,
+	.get_num_tx_queues = ipxl_get_num_queues,
+	.get_num_rx_queues = ipxl_get_num_queues,
 };
 
-static int ipxlat_init(void)
+bool ipxl_dev_is_valid(const struct net_device *dev)
 {
-	return rtnl_link_register(&ipxlat_link_ops);
+	return dev->rtnl_link_ops == &ipxl_link_ops;
 }
 
-static void ipxlat_exit(void)
+static int __init ipxl_init(void)
 {
-	rtnl_link_unregister(&ipxlat_link_ops);
+	int err;
+
+	err = rtnl_link_register(&ipxl_link_ops);
+	if (err)
+		return err;
+
+	err = ipxl_nl_register();
+	if (err) {
+		rtnl_link_unregister(&ipxl_link_ops);
+		return err;
+	}
+
+	return 0;
 }
 
-module_init(ipxlat_init);
-module_exit(ipxlat_exit);
+static void __exit ipxl_exit(void)
+{
+	ipxl_nl_unregister();
+	rtnl_link_unregister(&ipxl_link_ops);
+}
+
+module_init(ipxl_init);
+module_exit(ipxl_exit);

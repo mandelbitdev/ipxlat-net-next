@@ -24,129 +24,108 @@ static __be32 addr64(struct in6_addr const *src, unsigned int q1,
 	return htonl((q1 << 24) | (q2 << 16) | (q3 << 8) | q4);
 }
 
-static int rfc6052_6to4(struct ipv6_prefix const *prefix,
-			struct in6_addr const *src, __be32 *dst)
-{
-	if (!prefix6_contains(prefix, src)) {
-		log_debug("%pI6c/%u does not contain %pI6c.",
-			  &prefix->addr, prefix->len, src);
-		return -EINVAL;
-	}
-
-	switch (prefix->len) {
-	case 96:
-		*dst = src->s6_addr32[3];
-		return 0;
-	case 64:
-		*dst = addr64(src, 9, 10, 11, 12);
-		return 0;
-	case 56:
-		*dst = addr64(src, 7, 9, 10, 11);
-		return 0;
-	case 48:
-		*dst = addr64(src, 6, 7, 9, 10);
-		return 0;
-	case 40:
-		*dst = addr64(src, 5, 6, 7, 9);
-		return 0;
-	case 32:
-		*dst = src->s6_addr32[1];
-		return 0;
-	}
-
-	WARN(1, "Prefix has an invalid length: %u.", prefix->len);
-	return -EINVAL;
-}
-
 static void addr46(__be32 __src, struct in6_addr *dst, unsigned int q1,
 		   unsigned int q2, unsigned int q3, unsigned int q4)
 {
 	__u32 src = ntohl(__src);
 	dst->s6_addr[q1] = ((src >> 24) & 0xFF);
 	dst->s6_addr[q2] = ((src >> 16) & 0xFF);
-	dst->s6_addr[q3] = ((src >>  8) & 0xFF);
-	dst->s6_addr[q4] = ((src      ) & 0xFF);
+	dst->s6_addr[q3] = ((src >> 8) & 0xFF);
+	dst->s6_addr[q4] = ((src) & 0xFF);
 }
 
-int rfc6052_4to6(struct ipv6_prefix const *prefix, __be32 src,
-			struct in6_addr *dst)
+void siit46_addr(const struct ipv6_prefix *pool6, __be32 addr4,
+		 struct in6_addr *addr6)
 {
-	memset(dst, 0, sizeof(*dst));
+	*addr6 = pool6->addr;
 
-	switch (prefix->len) {
+	switch (pool6->len) {
 	case 96:
-		dst->s6_addr32[0] = prefix->addr.s6_addr32[0];
-		dst->s6_addr32[1] = prefix->addr.s6_addr32[1];
-		dst->s6_addr32[2] = prefix->addr.s6_addr32[2];
-		dst->s6_addr32[3] = src;
-		return 0;
+		addr6->s6_addr32[3] = addr4;
+		return;
 	case 64:
-		dst->s6_addr32[0] = prefix->addr.s6_addr32[0];
-		dst->s6_addr32[1] = prefix->addr.s6_addr32[1];
-		addr46(src, dst, 9, 10, 11, 12);
-		return 0;
+		addr46(addr4, addr6, 9, 10, 11, 12);
+		return;
 	case 56:
-		dst->s6_addr32[0] = prefix->addr.s6_addr32[0];
-		dst->s6_addr[4] = prefix->addr.s6_addr[4];
-		dst->s6_addr[5] = prefix->addr.s6_addr[5];
-		dst->s6_addr[6] = prefix->addr.s6_addr[6];
-		addr46(src, dst, 7, 9, 10, 11);
-		return 0;
+		addr46(addr4, addr6, 7, 9, 10, 11);
+		return;
 	case 48:
-		dst->s6_addr32[0] = prefix->addr.s6_addr32[0];
-		dst->s6_addr[4] = prefix->addr.s6_addr[4];
-		dst->s6_addr[5] = prefix->addr.s6_addr[5];
-		addr46(src, dst, 6, 7, 9, 10);
-		return 0;
+		addr46(addr4, addr6, 6, 7, 9, 10);
+		return;
 	case 40:
-		dst->s6_addr32[0] = prefix->addr.s6_addr32[0];
-		dst->s6_addr[4] = prefix->addr.s6_addr[4];
-		addr46(src, dst, 5, 6, 7, 9);
-		return 0;
+		addr46(addr4, addr6, 5, 6, 7, 9);
+		return;
 	case 32:
-		dst->s6_addr32[0] = prefix->addr.s6_addr32[0];
-		dst->s6_addr32[1] = src;
-		return 0;
+		addr6->s6_addr32[1] = addr4;
+		return;
 	}
 
-	/*
-	 * Critical because enforcing valid prefixes is pool6's
-	 * responsibility, not ours.
-	 */
-	WARN(1, "Prefix has an invalid length: %u.", prefix->len);
-	return -EINVAL;
+	DEBUG_NET_WARN_ON_ONCE(1);
 }
 
-int siit64_addrs(struct xlation *state, __be32 *src, __be32 *dst)
+int siit64_addrs(const struct ipxl_cfg *cfg, const struct ipv6hdr *hdr6,
+		 bool icmp_err, __be32 *src, __be32 *dst)
 {
-	struct ipv6_prefix *pool6 = &state->cfg->pool6;
-	struct ipv6hdr *hdr6 = ipv6_hdr(state->in);
+	const struct ipv6_prefix *pool6 = &cfg->pool6;
+	bool src_ok;
 
-	if (rfc6052_6to4(pool6, &hdr6->saddr, src) != 0) {
-		if (!pkt_is_icmp6_error(state->in))
-			return drop(state);
-		*src = state->cfg->pool6791v4.s_addr;
+	src_ok = prefix6_contains(pool6, &hdr6->saddr);
+	if (unlikely(!src_ok && !icmp_err)) {
+		log_debug("%pI6c/%u does not contain %pI6c.", &pool6->addr,
+			  pool6->len, &hdr6->saddr);
+		return -EINVAL;
+	}
+	if (unlikely(!prefix6_contains(pool6, &hdr6->daddr))) {
+		log_debug("%pI6c/%u does not contain %pI6c.", &pool6->addr,
+			  pool6->len, &hdr6->daddr);
+		return -EINVAL;
 	}
 
-	if (rfc6052_6to4(pool6, &hdr6->daddr, dst) != 0)
-		return drop(state);
+	switch (pool6->len) {
+	case 96:
+		if (likely(src_ok))
+			*src = hdr6->saddr.s6_addr32[3];
+		*dst = hdr6->daddr.s6_addr32[3];
+		break;
+	case 64:
+		if (likely(src_ok))
+			*src = addr64(&hdr6->saddr, 9, 10, 11, 12);
+		*dst = addr64(&hdr6->daddr, 9, 10, 11, 12);
+		break;
+	case 56:
+		if (likely(src_ok))
+			*src = addr64(&hdr6->saddr, 7, 9, 10, 11);
+		*dst = addr64(&hdr6->daddr, 7, 9, 10, 11);
+		break;
+	case 48:
+		if (likely(src_ok))
+			*src = addr64(&hdr6->saddr, 6, 7, 9, 10);
+		*dst = addr64(&hdr6->daddr, 6, 7, 9, 10);
+		break;
+	case 40:
+		if (likely(src_ok))
+			*src = addr64(&hdr6->saddr, 5, 6, 7, 9);
+		*dst = addr64(&hdr6->daddr, 5, 6, 7, 9);
+		break;
+	case 32:
+		if (likely(src_ok))
+			*src = hdr6->saddr.s6_addr32[1];
+		*dst = hdr6->daddr.s6_addr32[1];
+		break;
+	default:
+		DEBUG_NET_WARN_ON_ONCE(1);
+		return -EINVAL;
+	}
+
+	if (unlikely(!src_ok))
+		*src = cfg->pool6791v4.s_addr;
 
 	log_debug("Result: %pI4->%pI4", src, dst);
 	return 0;
 }
 
-int siit46_addrs(struct xlation *state, struct in6_addr *src,
-		 struct in6_addr *dst)
+int siit64_addrs_skb(const struct ipxl_cfg *cfg, struct sk_buff *skb,
+		     bool icmp_err, __be32 *src, __be32 *dst)
 {
-	struct ipv6_prefix *pool6 = &state->cfg->pool6;
-	struct iphdr *hdr4 = ip_hdr(state->in);
-
-	if (rfc6052_4to6(pool6, hdr4->saddr, src) != 0)
-		return drop(state);
-
-	if (rfc6052_4to6(pool6, hdr4->daddr, dst) != 0)
-		return drop(state);
-
-	log_debug("Result: %pI6c->%pI6c", src, dst);
-	return 0;
+	return siit64_addrs(cfg, ipv6_hdr(skb), icmp_err, src, dst);
 }

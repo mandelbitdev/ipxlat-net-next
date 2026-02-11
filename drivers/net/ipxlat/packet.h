@@ -59,10 +59,10 @@
 
 #include "types.h"
 
-static struct jool_cb *
-JOOL_CB(struct sk_buff const *skb)
+struct ipxl_pkt_ctx;
+static inline struct ipxl_cb *ipxl_skb_cb(struct sk_buff const *skb)
 {
-	return (struct jool_cb *)(skb->cb);
+	return (struct ipxl_cb *)(skb->cb);
 }
 
 /* Returns a hack-free version of the 'Traffic class' field from @hdr. */
@@ -76,6 +76,7 @@ static inline __u8 get_traffic_class(struct ipv6hdr const *hdr)
 /* Returns IP_DF if the DF flag from @hdr is set, 0 otherwise. */
 static inline __u16 is_df_set(struct iphdr const *hdr)
 {
+	/* ntohs(iph->frag_off) & IP_DF */
 	return be16_to_cpu(hdr->frag_off) & IP_DF;
 }
 
@@ -111,11 +112,6 @@ static inline __u16 get_v4_frag_offset(struct iphdr const *hdr)
 static inline unsigned int get_tot_len_ipv6(struct sk_buff const *skb)
 {
 	return sizeof(struct ipv6hdr) + be16_to_cpu(ipv6_hdr(skb)->payload_len);
-}
-
-static inline bool is_first_frag4(struct iphdr const *hdr)
-{
-	return get_v4_frag_offset(hdr) == 0;
 }
 
 static inline bool is_first_frag6(struct frag_hdr const *hdr)
@@ -154,8 +150,7 @@ static inline __be16 build_v6_frag_offset(__u16 frag_offset, __u16 mf)
  */
 static inline __be16 build_v4_frag_offset(bool df, __u16 mf, __u16 frag_offset)
 {
-	__u16 result = (df ? (1U << 14) : 0) |
-		       (mf ? (1U << 13) : 0) |
+	__u16 result = (df ? (1U << 14) : 0) | (mf ? (1U << 13) : 0) |
 		       (frag_offset >> 3);
 	return cpu_to_be16(result);
 }
@@ -169,26 +164,27 @@ static inline unsigned int tcp_hdr_len(struct tcphdr const *hdr)
 	return hdr->doff << 2;
 }
 
-struct jool_cb {
-	__u8 l4_proto;
-	/* Is this a subpacket, contained in an ICMP error? */
-	bool is_inner;
+#define IPXLAT_SKB_F_INNER 0x01
+#define IPXLAT_SKB_F_ICMP4_ERR 0x02
+#define IPXLAT_SKB_F_ICMP_ERR 0x04
 
-	/* Offset of the skb's fragment header (from skb->data), if any. */
-	unsigned int frag_offset;
-	/*
-	 * Offset of the packet's payload. (From skb->data.)
-	 * Because skbs only store pointers to headers.
-	 *
-	 * Sometimes the kernel seems to use skb->data for this. It would be
-	 * troublesome if we did the same, however, since functions such as
-	 * icmp_send() fail early when skb->data is after the layer-3 header.
-	 *
-	 * Note, even after the packet is validated, the payload can be paged
-	 * (unlike headers). Do not access the data pointed by this field
-	 * carelessly.
-	 */
-	unsigned int payload_offset;
+struct ipxl_cb {
+	__u16 l4_off;
+	__u16 payload_off;
+	__u16 fragh_off;
+	__u16 inner_l3_offset;
+	__u16 inner_l4_offset;
+	__u16 udp_zero_csum_len;
+	__u16 inner_udp_zero_csum_len;
+	__u8 l4_proto;
+	__u8 l3_hdr_len;
+	__u8 inner_l3_hdr_len;
+	__u8 flags;
+	struct {
+		__u8 type;
+		__u8 code;
+		__u32 info;
+	} icmp_err;
 };
 
 /*
@@ -197,29 +193,31 @@ struct jool_cb {
 static inline void pkt_fill(struct sk_buff *skb, __u8 l4_proto,
 			    struct frag_hdr *frag, void *payload)
 {
-	struct jool_cb *cb = JOOL_CB(skb);
+	struct ipxl_cb *cb = ipxl_skb_cb(skb);
 
 	cb->l4_proto = l4_proto;
-	cb->is_inner = 0;
-	cb->frag_offset = frag ? ((unsigned char *)frag - skb->data) : 0;
-	cb->payload_offset = (unsigned char *)payload - skb->data;
+	cb->flags = 0;
+	cb->l4_off = skb_transport_offset(skb);
+	cb->l3_hdr_len = skb_transport_offset(skb) - skb_network_offset(skb);
+	cb->fragh_off = frag ? ((unsigned char *)frag - skb->data) : 0;
+	cb->payload_off = (unsigned char *)payload - skb->data;
 }
 
 /* must be IPv6. */
 static inline struct frag_hdr *pkt_frag_hdr(struct sk_buff const *skb)
 {
-	unsigned int offset = JOOL_CB(skb)->frag_offset;
+	unsigned int offset = ipxl_skb_cb(skb)->fragh_off;
 	return offset ? ((struct frag_hdr *)(skb->data + offset)) : NULL;
 }
 
 static inline void *pkt_payload(struct sk_buff const *skb)
 {
-	return skb->data + JOOL_CB(skb)->payload_offset;
+	return skb->data + ipxl_skb_cb(skb)->payload_off;
 }
 
 static inline bool pkt_is_inner(struct sk_buff const *skb)
 {
-	return JOOL_CB(skb)->is_inner;
+	return ipxl_skb_cb(skb)->flags & IPXLAT_SKB_F_INNER;
 }
 
 static inline unsigned int skb_l3hdr_len(struct sk_buff const *skb)
@@ -236,7 +234,7 @@ static inline unsigned int pkt_l4hdr_len(struct sk_buff const *skb)
 /* Includes first set of layer-3 and layer-4 headers. */
 static inline unsigned int pkt_hdrs_len(struct sk_buff const *skb)
 {
-	return JOOL_CB(skb)->payload_offset;
+	return ipxl_skb_cb(skb)->payload_off;
 }
 
 /*
@@ -250,33 +248,31 @@ static inline unsigned int skb_datagram_len(struct sk_buff const *skb)
 
 static inline bool pkt_is_icmp6_error(struct sk_buff const *skb)
 {
-	return (JOOL_CB(skb)->l4_proto == NEXTHDR_ICMP) &&
+	return (ipxl_skb_cb(skb)->l4_proto == NEXTHDR_ICMP) &&
 	       icmpv6_is_err(icmp6_hdr(skb)->icmp6_type);
 }
 
 static inline bool pkt_is_icmp4_error(struct sk_buff const *skb)
 {
-	return (JOOL_CB(skb)->l4_proto == IPPROTO_ICMP) &&
+	return (ipxl_skb_cb(skb)->l4_proto == IPPROTO_ICMP) &&
 	       icmp_is_err(icmp_hdr(skb)->type);
 }
 
-struct xlation; // XXX
-
 /*
- * Ensures @skb isn't corrupted and initializes @state->in out of it.
+ * Ensures @skb isn't corrupted and initializes parsing metadata in skb->cb.
  *
  * After this function, code can assume:
  * - @skb contains full l3 and l4 headers (including inner ones), their order
  *   seems to make sense, and they are all within the data area of @skb. (ie.
  *   they are not paged.)
  * - @skb's payload isn't truncated (though inner packet payload might).
- * - The pkt_* functions above can now be used on @state->in.
+ * - The pkt_* functions above can now be used on @skb.
  * - The length fields in the l3 headers can be relied upon. (But not the ones
  *   contained in inner packets.)
  *
- * Healthy layer 4 checksums and lengths are not guaranteed, but that's not an
- * issue since this kind of corruption should be translated along (see
- * validate_icmp6_csum()).
+ * Healthy layer 4 checksums and lengths are not guaranteed in general, but
+ * ICMP error checksum validation required by the translation path is handled in
+ * the validator.
  *
  * Also, this function does not ensure @skb is either TCP, UDP or ICMP. This is
  * because SIIT Jool must translate other protocols in a best-effort basis.
@@ -285,12 +281,10 @@ struct xlation; // XXX
  * to skb_network_header(skb), you will need to assign it again (by calling
  * skb_network_header() again).
  */
-int pkt_init_ipv6(struct xlation *state, struct sk_buff *skb);
-int pkt_init_ipv4(struct xlation *state, struct sk_buff *skb);
+int ipxl_v6_validate(const struct ipxl_pkt_ctx *ctx, struct sk_buff *skb);
+int ipxl_v4_validate(const struct ipxl_pkt_ctx *ctx, struct sk_buff *skb);
 /*
  * @}
  */
-
-unsigned char *jskb_pull(struct sk_buff *skb, unsigned int len);
 
 #endif /* _NET_SIIT_PACKET_H_ */

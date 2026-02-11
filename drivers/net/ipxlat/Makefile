@@ -13,3 +13,5 @@ ipxlat-objs += address.o
 ipxlat-objs += ipv6_hdr_iterator.o
 ipxlat-objs += packet.o
 ipxlat-objs += translation_state.o
+ipxlat-objs += netlink.o
+ipxlat-objs += netlink-gen.o

@@ -15,8 +15,9 @@
 /*
  * These should not be committed, so if you see one in uploaded code, delete it.
  */
-#define log_delete(text, ...) pr_err("DELETE ME! %s(%d): " text "\n", \
-				     __func__, __LINE__, ##__VA_ARGS__)
+#define log_delete(text, ...)                                       \
+	pr_err("DELETE ME! %s(%d): " text "\n", __func__, __LINE__, \
+	       ##__VA_ARGS__)
 #define PR_DEBUG pr_err("%s:%d (%s())\n", __FILE__, __LINE__, __func__)
 
 #endif /* _NET_SIIT_LOG_H_ */

@@ -7,18 +7,20 @@
 
 #include "translation_state.h"
 
-int drop(struct xlation *state)
+int ipxl_drop_icmp(const struct ipxl_pkt_ctx *ctx, struct sk_buff *skb,
+		   __u8 type, __u8 code, __u32 info)
 {
-//	state->stats->rx_errors++;
-//	state->stats->rx_dropped++;
-	return -EINVAL;
-}
+	struct ipxl_cb *cb;
 
-int drop_icmp(struct xlation *state, __u8 type, __u8 code, __u32 info)
-{
-	state->result.set = true;
-	state->result.type = type;
-	state->result.code = code;
-	state->result.info = info;
-	return drop(state);
+	(void)ctx;
+
+	if (skb) {
+		cb = ipxl_skb_cb(skb);
+		cb->flags |= IPXLAT_SKB_F_ICMP_ERR;
+		cb->icmp_err.type = type;
+		cb->icmp_err.code = code;
+		cb->icmp_err.info = info;
+	}
+
+	return -EINVAL;
 }

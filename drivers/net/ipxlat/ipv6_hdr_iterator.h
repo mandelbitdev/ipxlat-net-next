@@ -20,7 +20,6 @@
 #include <linux/types.h>
 #include <linux/ipv6.h>
 
-
 /*
  * An object that helps you traverse the IPv6 headers of a packet.
  */
@@ -40,10 +39,11 @@ struct hdr_iterator {
  * @param main_hdr The IPv6 header whose subheaders you want to traverse.
  * @return a initialized "hdr_iterator".
  */
-#define HDR_ITERATOR_INIT(main_hdr) { \
-	.hdr_type = (main_hdr)->nexthdr, \
-	.data = (main_hdr) + 1, \
-}
+#define HDR_ITERATOR_INIT(main_hdr)              \
+	{                                        \
+		.hdr_type = (main_hdr)->nexthdr, \
+		.data = (main_hdr) + 1,          \
+	}
 
 /*
  * Advances "iterator->data" one header and updates "iterator->hdr_type" accordingly. If "iterator"
