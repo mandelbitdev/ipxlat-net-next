@@ -20,6 +20,7 @@
 static int ipxl_validate_icmp6_csum(struct sk_buff *skb);
 static int ipxl_v6_l4hdr_len(struct sk_buff *skb, unsigned int l4_offset,
 			     __u8 l4_proto, bool *has_inner);
+static bool ipxl_addr6_src_valid(const struct in6_addr *addr6);
 
 static int ipxl_v6_l4hdr_len(struct sk_buff *skb, unsigned int l4_offset,
 			     __u8 l4_proto, bool *has_inner)
@@ -210,6 +211,8 @@ static int ipxl_v6_parse_need_pull(const struct ipxl_pkt_ctx *ctx,
 		return -EINVAL;
 	if (unlikely(l3_hdr->version != 6))
 		return -EINVAL;
+	if (unlikely(!ipxl_addr6_src_valid(&l3_hdr->saddr)))
+		return -EINVAL;
 	cb = ipxl_skb_cb(skb);
 	cb->flags = 0;
 
@@ -334,6 +337,12 @@ static bool ipxl_addr4_valid(__be32 addr4)
 {
 	return !(ipv4_is_zeronet(addr4) || ipv4_is_loopback(addr4) ||
 		 ipv4_is_multicast(addr4) || ipv4_is_lbcast(addr4));
+}
+
+static bool ipxl_addr6_src_valid(const struct in6_addr *addr6)
+{
+	return !(ipv6_addr_any(addr6) || ipv6_addr_loopback(addr6) ||
+		 ipv6_addr_is_multicast(addr6));
 }
 
 enum ipxl_srr_state {
@@ -556,7 +565,7 @@ static int ipxl_v4_parse_need_pull(const struct ipxl_pkt_ctx *ctx,
 	unsigned int l3_off, l4_off;
 	const struct iphdr *l3_hdr;
 	enum ipxl_srr_state srr;
-	bool is_icmp_err, udp_zero_reject;
+	bool is_icmp_err, src_invalid, dst_invalid, udp_zero_reject;
 
 	l3_off = skb_network_offset(skb);
 	/* get the actual length of the IP header including option */
@@ -569,9 +578,9 @@ static int ipxl_v4_parse_need_pull(const struct ipxl_pkt_ctx *ctx,
 	if (unlikely(!l3_hdr))
 		return -EINVAL;
 
-	/* validate the addresses */
-	if (unlikely(!ipxl_addr4_valid(l3_hdr->saddr) ||
-		     !ipxl_addr4_valid(l3_hdr->daddr)))
+	src_invalid = !ipxl_addr4_valid(l3_hdr->saddr);
+	dst_invalid = !ipxl_addr4_valid(l3_hdr->daddr);
+	if (unlikely(dst_invalid))
 		return -EINVAL;
 
 	/* RFC7915 §4.1 */
@@ -601,8 +610,11 @@ static int ipxl_v4_parse_need_pull(const struct ipxl_pkt_ctx *ctx,
 		return -EINVAL;
 
 	/* only non fragmented packets or first fragments have transport hdrs */
-	if (unlikely(l3_hdr->frag_off & htons(IP_OFFSET)))
+	if (unlikely(l3_hdr->frag_off & htons(IP_OFFSET))) {
+		if (unlikely(src_invalid))
+			return -EINVAL;
 		return pull_len;
+	}
 
 	/* validate transport header */
 	l4_len = ipxl_v4_l4hdr_len(skb, l4_off, l3_hdr->protocol, &is_icmp_err,
@@ -615,6 +627,11 @@ static int ipxl_v4_parse_need_pull(const struct ipxl_pkt_ctx *ctx,
 				      ICMP_PKT_FILTERED, 0);
 	if (unlikely(l4_len < 0))
 		return l4_len;
+	/* RFC7915 §4.1:
+	 * Illegal IPv4 sources are accepted only for ICMPv4 error translation.
+	 */
+	if (unlikely(src_invalid && !is_icmp_err))
+		return -EINVAL;
 
 	cb->payload_off = l4_off + l4_len;
 	pull_len = cb->payload_off;

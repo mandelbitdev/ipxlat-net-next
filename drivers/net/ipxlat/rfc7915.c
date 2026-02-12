@@ -1982,7 +1982,7 @@ static int ipxl_v4_to_v6_inplace(const struct ipxl_pkt_ctx *ctx,
 	unsigned int pmtu6, threshold6, pkt_len6;
 	struct ipxl_cb *cb = ipxl_skb_cb(skb);
 	const struct iphdr in4 = *ip_hdr(skb);
-	bool first_frag, in_icmp_err, need_frag, df;
+	bool first_frag, is_icmp_err, need_frag, df;
 	struct frag_hdr *fh6;
 	struct ipv6hdr *iph6;
 	int delta, err;
@@ -1994,7 +1994,7 @@ static int ipxl_v4_to_v6_inplace(const struct ipxl_pkt_ctx *ctx,
 	l4_proto = cb->l4_proto;
 	df = in4.frag_off & htons(IP_DF);
 	first_frag = !(in4.frag_off & htons(IP_OFFSET));
-	in_icmp_err = cb->flags & IPXLAT_SKB_F_IN_ICMP_ERR;
+	is_icmp_err = cb->flags & IPXLAT_SKB_F_IN_ICMP_ERR;
 	need_frag = ip_is_fragment(&in4);
 
 	/* evaluate IPv6 size against PMTU and local threshold policy */
@@ -2013,7 +2013,7 @@ static int ipxl_v4_to_v6_inplace(const struct ipxl_pkt_ctx *ctx,
 	/* ICMPv4 errors can be squeezed/truncated later during 4->6 ICMP
 	 * translation, so do not trigger the generic DF+PMTU early drop here.
 	 */
-	if (unlikely(df && pmtu6 < pkt_len6 && !in_icmp_err))
+	if (unlikely(df && pmtu6 < pkt_len6 && !is_icmp_err))
 		return ipxl_drop_icmp(ctx, skb, ICMP_DEST_UNREACH,
 				      ICMP_FRAG_NEEDED,
 				      pmtu6 > 20 ? pmtu6 - 20 : 0);
