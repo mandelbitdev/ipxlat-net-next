@@ -1859,7 +1859,7 @@ static int ipxl_icmp_inner_4to6_xlate(const struct ipxl_pkt_ctx *ctx,
 				      const struct iphdr *inner4)
 {
 	unsigned int inner_l4_off, inner_l3_payload, inner_l4_payload,
-		old_prefix, new_prefix;
+		old_prefix, new_prefix, inner_tot_len;
 	const unsigned int outer_l3_len = skb_transport_offset(skb);
 	const unsigned int inner_l3_len = inner4->ihl << 2;
 	const bool need_frag = ip_is_fragment(inner4);
@@ -1892,8 +1892,15 @@ static int ipxl_icmp_inner_4to6_xlate(const struct ipxl_pkt_ctx *ctx,
 
 	inner_ip6 = (struct ipv6hdr *)(skb->data + outer_l3_len +
 				       sizeof(struct icmp6hdr));
-	inner_l3_payload = skb->len - (outer_l3_len + sizeof(struct icmp6hdr) +
-				       sizeof(struct ipv6hdr));
+	/* Use the quoted IPv4 header's total-length, not skb->len:
+	 * skb->len also includes ICMP extension bytes at the end, which are
+	 * not part of the quoted inner IP datagram length.
+	 */
+	inner_tot_len = ntohs(inner4->tot_len);
+	if (unlikely(inner_tot_len < inner_l3_len))
+		return -EINVAL;
+	inner_l3_payload = inner_tot_len - inner_l3_len +
+			   (need_frag ? sizeof(struct frag_hdr) : 0);
 	ipxl_v4_to_v6_hdr(inner_ip6, inner4, inner_l3_payload,
 			  need_frag ? NEXTHDR_FRAGMENT :
 				      ipxlat_proto2nexthdr(inner4->protocol),
