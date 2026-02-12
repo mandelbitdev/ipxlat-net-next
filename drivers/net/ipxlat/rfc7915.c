@@ -860,6 +860,12 @@ static int ipxl_icmp_inner_6to4_xlate(const struct ipxl_pkt_ctx *ctx,
 	const struct ipxl_cb *cb = ipxl_skb_cb(skb);
 	unsigned int old_prefix, new_prefix, inner_l3_len, inner_tot_len;
 	unsigned int inner_l4_len, outer_prefix_len;
+	/* TODO: Consider isolating inner translation by temporarily pulling
+	 * outer_prefix_len and operating on a pure "inner view". That could
+	 * remove the need for outer header snapshot/restore here.
+	 */
+	const struct iphdr outer4_copy = *ip_hdr(skb);
+	const struct icmphdr outer_icmp4_copy = *icmp_hdr(skb);
 	struct frag_hdr inner_frag_copy;
 	bool has_inner_frag, first_inner_frag, df;
 	struct ipv6hdr inner6_copy;
@@ -906,6 +912,8 @@ static int ipxl_icmp_inner_6to4_xlate(const struct ipxl_pkt_ctx *ctx,
 	skb_push(skb, new_prefix);
 	skb_reset_network_header(skb);
 	skb_set_transport_header(skb, sizeof(struct iphdr));
+	*ip_hdr(skb) = outer4_copy;
+	*icmp_hdr(skb) = outer_icmp4_copy;
 
 	inner4 = (struct iphdr *)(skb->data + outer_prefix_len);
 	inner_tot_len = ntohs(inner6_copy.payload_len) + sizeof(inner6_copy) -
@@ -1118,7 +1126,7 @@ static __be16 ipxl_v6_to_v4_frag_off(struct sk_buff *skb,
 static int ipxl_v6_to_v4_inplace(const struct ipxl_pkt_ctx *ctx,
 				 struct sk_buff *skb)
 {
-	bool has_frag, first_frag, is_icmp6_err = false;
+	bool has_frag, first_frag, is_icmp6_err;
 	const struct ipv6hdr in6 = *ipv6_hdr(skb);
 	struct ipxl_cb *cb = ipxl_skb_cb(skb);
 	unsigned int ip6_len, min_l4_len;
@@ -1127,7 +1135,6 @@ static int ipxl_v6_to_v4_inplace(const struct ipxl_pkt_ctx *ctx,
 	struct frag_hdr frag_copy;
 	struct icmp6hdr ic6_copy;
 	struct frag_hdr *frag6;
-	struct icmp6hdr *ic6;
 	__be32 saddr, daddr;
 	struct iphdr *iph4;
 	int err;
@@ -1141,16 +1148,20 @@ static int ipxl_v6_to_v4_inplace(const struct ipxl_pkt_ctx *ctx,
 	if (unlikely(has_frag))
 		frag_copy = *frag6;
 	first_frag = is_first_frag6(has_frag ? &frag_copy : NULL);
-	if (unlikely((l4_proto == NEXTHDR_ICMP) && first_frag)) {
-		ic6 = icmp6_hdr(skb);
-		ic6_copy = *ic6;
-		is_icmp6_err = icmpv6_is_err(ic6_copy.icmp6_type);
+	is_icmp6_err = cb->flags & IPXLAT_SKB_F_IN_ICMP_ERR;
+	if (unlikely(is_icmp6_err)) {
+		if (unlikely(l4_proto != NEXTHDR_ICMP))
+			return -EINVAL;
+
+		ic6_copy = *icmp6_hdr(skb);
 	}
 
 	/* derive translated IPv4 endpoints */
 	err = siit64_addrs(ctx->cfg, &in6, is_icmp6_err, &saddr, &daddr);
 	if (unlikely(err))
 		return err;
+	// log_debug("6->4 addrs: %pI6c->%pI6c => %pI4->%pI4",
+	// 	  &in6.saddr, &in6.daddr, &saddr, &daddr);
 
 	/* replace outer IPv6 hdr with IPv4 hdr in-place */
 	l3_delta = (int)sizeof(struct iphdr) - (int)ip6_len;
@@ -2041,6 +2052,8 @@ static int ipxl_v4_to_v6_inplace(const struct ipxl_pkt_ctx *ctx,
 
 	/* translate IPv4 endpoints into IPv6 addresses using pool6 prefix */
 	siit46_addrs_skb(ctx->cfg, &in4, iph6);
+	// log_debug("4->6 addrs: %pI4->%pI4 => %pI6c->%pI6c",
+	// 	  &in4.saddr, &in4.daddr, &iph6->saddr, &iph6->daddr);
 
 	/* add IPv6 fragment hdr when the IPv4 packet carried fragmentation */
 	if (unlikely(need_frag)) {
