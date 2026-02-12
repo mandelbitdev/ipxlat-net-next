@@ -60,11 +60,10 @@ static int ipxl_v6_summarize_basic(const struct ipxl_pkt_ctx *ctx,
 				   unsigned int *l4_offset,
 				   unsigned int *payload_offset)
 {
-	unsigned int frag_hdr_off, exthdr_off;
+	unsigned int frag_hdr_off, l4hdr_off;
 	struct frag_hdr frag_buf, *frag;
-	int l4hdr_off, l4hdr_len, err;
+	int l4hdr_len, err;
 	struct ipv6hdr ip6_buf, *ip6;
-	__be16 frag_off;
 	bool first_frag;
 	__u8 nexthdr;
 
@@ -91,8 +90,9 @@ static int ipxl_v6_summarize_basic(const struct ipxl_pkt_ctx *ctx,
 			return -EINVAL;
 		}
 
-		if (unlikely(ipv6_ext_hdr(frag->nexthdr))) {
-			log_debug("There's an extension header (%u) after Fragment.",
+		if (unlikely(ipv6_ext_hdr(frag->nexthdr) &&
+			     frag->nexthdr != NEXTHDR_NONE)) {
+			log_debug("There's an unsupported extension header (%u) after Fragment.",
 				  frag->nexthdr);
 			return -EPROTONOSUPPORT;
 		}
@@ -106,10 +106,11 @@ static int ipxl_v6_summarize_basic(const struct ipxl_pkt_ctx *ctx,
 	}
 
 	nexthdr = ip6->nexthdr;
-	exthdr_off = l3_offset + sizeof(struct ipv6hdr);
-	l4hdr_off = ipv6_skip_exthdr(skb, exthdr_off, &nexthdr, &frag_off);
-	if (unlikely(l4hdr_off < 0))
+	l4hdr_off = l3_offset;
+	err = ipv6_find_hdr(skb, &l4hdr_off, -1, NULL, NULL);
+	if (unlikely(err < 0))
 		return -EINVAL;
+	nexthdr = err;
 
 	*l4_proto = nexthdr;
 	*l4_offset = l4hdr_off;
