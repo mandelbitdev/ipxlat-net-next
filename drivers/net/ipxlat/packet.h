@@ -165,8 +165,8 @@ static inline unsigned int tcp_hdr_len(struct tcphdr const *hdr)
 }
 
 #define IPXLAT_SKB_F_INNER 0x01
-#define IPXLAT_SKB_F_ICMP4_ERR 0x02
-#define IPXLAT_SKB_F_ICMP_ERR 0x04
+#define IPXLAT_SKB_F_IN_ICMP_ERR 0x02
+#define IPXLAT_SKB_F_OUT_ICMP_ERR 0x04
 
 struct ipxl_cb {
 	__u16 l4_off;
@@ -174,9 +174,11 @@ struct ipxl_cb {
 	__u16 fragh_off;
 	__u16 inner_l3_offset;
 	__u16 inner_l4_offset;
+	__u16 inner_fragh_off;
 	__u16 udp_zero_csum_len;
 	__u16 inner_udp_zero_csum_len;
 	__u8 l4_proto;
+	__u8 inner_l4_proto;
 	__u8 l3_hdr_len;
 	__u8 inner_l3_hdr_len;
 	__u8 flags;

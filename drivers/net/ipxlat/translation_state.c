@@ -16,7 +16,7 @@ int ipxl_drop_icmp(const struct ipxl_pkt_ctx *ctx, struct sk_buff *skb,
 
 	if (skb) {
 		cb = ipxl_skb_cb(skb);
-		cb->flags |= IPXLAT_SKB_F_ICMP_ERR;
+		cb->flags |= IPXLAT_SKB_F_OUT_ICMP_ERR;
 		cb->icmp_err.type = type;
 		cb->icmp_err.code = code;
 		cb->icmp_err.info = info;

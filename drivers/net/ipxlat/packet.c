@@ -139,6 +139,7 @@ static int ipxl_v6_icmp_inner_need_pull(const struct ipxl_pkt_ctx *ctx,
 	} ptr;
 
 	unsigned int inner_fhdr_off, inner_l4_off, inner_payload_off;
+	struct ipxl_cb *cb = ipxl_skb_cb(skb);
 	__u8 inner_l4_proto;
 	bool first_frag;
 	int error;
@@ -156,6 +157,11 @@ static int ipxl_v6_icmp_inner_need_pull(const struct ipxl_pkt_ctx *ctx,
 					&inner_l4_off, &inner_payload_off);
 	if (unlikely(error))
 		return error;
+
+	cb->inner_l3_offset = outer_payload_off;
+	cb->inner_l4_offset = inner_l4_off;
+	cb->inner_fragh_off = inner_fhdr_off;
+	cb->inner_l4_proto = inner_l4_proto;
 
 	if (unlikely(inner_fhdr_off)) {
 		ptr.frag = skb_hdr_ptr(skb, inner_fhdr_off, buffer.frag);
@@ -259,7 +265,7 @@ static int ipxl_v6_parse_need_pull(const struct ipxl_pkt_ctx *ctx,
 		if (unlikely(l4_len < 0))
 			return l4_len;
 		if (unlikely(is_icmp_err)) {
-			cb->flags |= IPXLAT_SKB_F_ICMP_ERR;
+			cb->flags |= IPXLAT_SKB_F_IN_ICMP_ERR;
 
 			inner_pull_len =
 				ipxl_v6_icmp_inner_need_pull(ctx, skb,
@@ -306,7 +312,7 @@ int ipxl_v6_validate(const struct ipxl_pkt_ctx *ctx, struct sk_buff *skb)
 	cb = ipxl_skb_cb(skb);
 	skb_set_transport_header(skb, cb->l4_off);
 
-	if (unlikely(cb->flags & IPXLAT_SKB_F_ICMP_ERR)) {
+	if (unlikely(cb->flags & IPXLAT_SKB_F_IN_ICMP_ERR)) {
 		if (unlikely(cb->l4_proto != NEXTHDR_ICMP)) {
 			DEBUG_NET_WARN_ON_ONCE(1);
 			return -EINVAL;
@@ -618,7 +624,7 @@ static int ipxl_v4_parse_need_pull(const struct ipxl_pkt_ctx *ctx,
 			ipxl_v4_icmp_inner_need_pull(ctx, skb, cb->payload_off);
 		if (unlikely(pull_len < 0))
 			return pull_len;
-		cb->flags |= IPXLAT_SKB_F_ICMP4_ERR;
+		cb->flags |= IPXLAT_SKB_F_IN_ICMP_ERR;
 	}
 
 	return pull_len;
@@ -687,7 +693,7 @@ int ipxl_v4_validate(const struct ipxl_pkt_ctx *ctx, struct sk_buff *skb)
 	cb = ipxl_skb_cb(skb);
 	skb_set_transport_header(skb, cb->l4_off);
 
-	if (unlikely(cb->flags & IPXLAT_SKB_F_ICMP4_ERR)) {
+	if (unlikely(cb->flags & IPXLAT_SKB_F_IN_ICMP_ERR)) {
 		if (unlikely(cb->l4_proto != IPPROTO_ICMP)) {
 			DEBUG_NET_WARN_ON_ONCE(1);
 			return -EINVAL;

@@ -289,7 +289,7 @@ static enum ipxl_xlat_action ipxl_xlat_46(const struct ipxl_pkt_ctx *ctx,
 
 static enum ipxl_xlat_action ipxl_failed_action(struct sk_buff *skb)
 {
-	return ipxl_skb_cb(skb)->flags & IPXLAT_SKB_F_ICMP_ERR ?
+	return ipxl_skb_cb(skb)->flags & IPXLAT_SKB_F_OUT_ICMP_ERR ?
 		       IPXL_XLAT_ACT_ICMP_ERR :
 		       IPXL_XLAT_ACT_DROP;
 }
@@ -348,6 +348,63 @@ static unsigned int ipxl_l4_min_len(__u8 protocol)
 		return sizeof(struct icmphdr);
 	}
 	return 0;
+}
+
+static int ipxl_cb_rebase_offsets(struct ipxl_cb *cb, int delta)
+{
+	int off;
+
+	off = cb->l4_off + delta;
+	if (unlikely(off < 0))
+		return -EINVAL;
+	cb->l4_off = off;
+
+	off = cb->payload_off + delta;
+	if (unlikely(off < 0))
+		return -EINVAL;
+	cb->payload_off = off;
+
+	if (unlikely(cb->flags & IPXLAT_SKB_F_IN_ICMP_ERR)) {
+		off = cb->inner_l3_offset + delta;
+		if (unlikely(off < 0))
+			return -EINVAL;
+		cb->inner_l3_offset = off;
+
+		off = cb->inner_l4_offset + delta;
+		if (unlikely(off < 0))
+			return -EINVAL;
+		cb->inner_l4_offset = off;
+
+		if (cb->inner_fragh_off) {
+			off = cb->inner_fragh_off + delta;
+			if (unlikely(off < 0))
+				return -EINVAL;
+			cb->inner_fragh_off = off;
+		}
+	}
+
+	return 0;
+}
+
+static bool ipxl_cb_offsets_valid(const struct ipxl_cb *cb)
+{
+	if (unlikely(cb->payload_off < cb->l4_off))
+		return false;
+
+	if (unlikely(cb->flags & IPXLAT_SKB_F_IN_ICMP_ERR)) {
+		if (unlikely(cb->inner_l3_offset < cb->payload_off))
+			return false;
+		if (unlikely(cb->inner_l4_offset < cb->inner_l3_offset))
+			return false;
+		if (unlikely(cb->inner_fragh_off &&
+			     cb->inner_fragh_off < cb->inner_l3_offset))
+			return false;
+		if (unlikely(cb->inner_fragh_off &&
+			     cb->inner_fragh_off >= cb->inner_l4_offset))
+			return false;
+	}
+
+	return true;
 }
 
 static __sum16 ipxl_l4_csum_ipv6(const struct in6_addr *saddr,
@@ -800,41 +857,38 @@ static int ipxl_icmp6_errhdr_to_icmp4(const struct ipxl_pkt_ctx *ctx,
 static int ipxl_icmp_inner_6to4_xlate(const struct ipxl_pkt_ctx *ctx,
 				      struct sk_buff *skb, int *inner_delta)
 {
-	unsigned int old_prefix, new_prefix, inner_l4_off, inner_l3_len;
-	unsigned int inner_l4_len, inner_frag_off, inner_tot_len;
-	const unsigned int outer_prefix_len =
-		skb_transport_offset(skb) + sizeof(struct icmphdr);
-	struct frag_hdr inner_frag_copy, *inner_frag;
+	const struct ipxl_cb *cb = ipxl_skb_cb(skb);
+	unsigned int old_prefix, new_prefix, inner_l3_len, inner_tot_len;
+	unsigned int inner_l4_len, outer_prefix_len;
+	struct frag_hdr inner_frag_copy;
 	bool has_inner_frag, first_inner_frag, df;
 	struct ipv6hdr inner6_copy;
-	__u8 inner_nexthdr, inner_l4_proto;
+	unsigned int inner_l3_off, inner_l4_off;
+	__u8 inner_l4_proto;
 	struct iphdr *inner4;
 	__be32 saddr, daddr;
-	int nexthdr, err;
-	__be16 frag;
+	int err;
 
-	inner6_copy = *(struct ipv6hdr *)(skb->data + outer_prefix_len);
-
-	inner_nexthdr = inner6_copy.nexthdr;
-	inner_l4_off = ipv6_skip_exthdr(skb,
-					outer_prefix_len + sizeof(inner6_copy),
-					&inner_nexthdr, &frag);
-	if (unlikely(inner_l4_off < 0))
+	if (unlikely(!(cb->flags & IPXLAT_SKB_F_IN_ICMP_ERR)))
 		return -EINVAL;
-	inner_l3_len = (unsigned int)inner_l4_off - outer_prefix_len;
 
-	inner_frag_off = outer_prefix_len;
-	nexthdr = ipv6_find_hdr(skb, &inner_frag_off, NEXTHDR_FRAGMENT, NULL,
-				NULL);
-	has_inner_frag = nexthdr == NEXTHDR_FRAGMENT;
+	inner_l3_off = cb->inner_l3_offset;
+	inner_l4_off = cb->inner_l4_offset;
+	if (unlikely(inner_l4_off < inner_l3_off))
+		return -EINVAL;
+
+	outer_prefix_len = inner_l3_off;
+	inner6_copy = *(struct ipv6hdr *)(skb->data + outer_prefix_len);
+	inner_l3_len = inner_l4_off - inner_l3_off;
+	inner_l4_proto = nexthdr2proto(cb->inner_l4_proto);
+	has_inner_frag = !!cb->inner_fragh_off;
 	first_inner_frag = true;
 	if (unlikely(has_inner_frag)) {
-		inner_frag = (struct frag_hdr *)(skb->data + inner_frag_off);
-		inner_frag_copy = *inner_frag;
+		inner_frag_copy = *(struct frag_hdr *)(skb->data +
+						      cb->inner_fragh_off);
 		first_inner_frag = is_first_frag6(&inner_frag_copy);
 	}
 
-	inner_l4_proto = nexthdr2proto(inner_nexthdr);
 	inner_l4_len = first_inner_frag ? ipxl_l4_min_len(inner_l4_proto) : 0;
 	if (unlikely(first_inner_frag &&
 		     skb_ensure_writable(skb, inner_l4_off + inner_l4_len)))
@@ -999,7 +1053,7 @@ static int ipxl_icmp6_to_icmp4_error(const struct ipxl_pkt_ctx *ctx,
 	int inner_delta, err;
 	struct icmphdr *ic4;
 
-	if (unlikely(!(cb->flags & IPXLAT_SKB_F_ICMP_ERR))) {
+	if (unlikely(!(cb->flags & IPXLAT_SKB_F_IN_ICMP_ERR))) {
 		DEBUG_NET_WARN_ON_ONCE(1);
 		return -EINVAL;
 	}
@@ -1069,7 +1123,7 @@ static int ipxl_v6_to_v4_inplace(const struct ipxl_pkt_ctx *ctx,
 	struct ipxl_cb *cb = ipxl_skb_cb(skb);
 	unsigned int ip6_len, min_l4_len;
 	__u8 l4_proto, out_l4_proto;
-	int payload_off, l3_delta;
+	int l3_delta;
 	struct frag_hdr frag_copy;
 	struct icmp6hdr ic6_copy;
 	struct frag_hdr *frag6;
@@ -1107,15 +1161,17 @@ static int ipxl_v6_to_v4_inplace(const struct ipxl_pkt_ctx *ctx,
 	skb->protocol = htons(ETH_P_IP);
 
 	/* rebase parser metadata after header-size delta */
-	payload_off = (int)cb->payload_off + l3_delta;
-	if (unlikely(payload_off < 0))
-		return -EINVAL;
+	err = ipxl_cb_rebase_offsets(cb, l3_delta);
+	if (unlikely(err))
+		return err;
 
 	cb->l3_hdr_len = sizeof(struct iphdr);
-	cb->l4_off = sizeof(struct iphdr);
-	cb->payload_off = payload_off;
 	cb->fragh_off = 0;
 	cb->l4_proto = out_l4_proto;
+	if (unlikely(!ipxl_cb_offsets_valid(cb))) {
+		DEBUG_NET_WARN_ON_ONCE(1);
+		return -EINVAL;
+	}
 
 	/* build translated IPv4 outer header */
 	iph4 = ip_hdr(skb);
@@ -1861,7 +1917,7 @@ static int ipxl_icmp4_to_icmp6_error(const struct ipxl_pkt_ctx *ctx,
 	struct iphdr inner4_ip;
 	int inner_delta, err;
 
-	if (unlikely(!(cb->flags & IPXLAT_SKB_F_ICMP_ERR))) {
+	if (unlikely(!(cb->flags & IPXLAT_SKB_F_IN_ICMP_ERR))) {
 		DEBUG_NET_WARN_ON_ONCE(1);
 		return -EINVAL;
 	}
@@ -1900,7 +1956,7 @@ static int ipxl_icmp4_to_icmp6(const struct ipxl_pkt_ctx *ctx,
 {
 	const struct icmphdr icmp4 = *icmp_hdr(skb);
 
-	if (unlikely(ipxl_skb_cb(skb)->flags & IPXLAT_SKB_F_ICMP4_ERR))
+	if (unlikely(ipxl_skb_cb(skb)->flags & IPXLAT_SKB_F_IN_ICMP_ERR))
 		return ipxl_icmp4_to_icmp6_error(ctx, skb);
 
 	return ipxl_icmp4_to_icmp6_info(skb, &icmp4, ipv6_hdr(skb),
@@ -2000,8 +2056,16 @@ static int ipxl_v4_to_v6_inplace(const struct ipxl_pkt_ctx *ctx,
 	 * that's not a problem currently given that cb->payload_off is
 	 * initialized as l3_off + ip4_len (+ l4_len).
 	 */
-	cb->payload_off = cb->payload_off + delta;
+	err = ipxl_cb_rebase_offsets(cb, delta);
+	if (unlikely(err))
+		return err;
+
+	cb->l3_hdr_len = ip6_len;
 	cb->l4_proto = ipxlat_proto2nexthdr(l4_proto);
+	if (unlikely(!ipxl_cb_offsets_valid(cb))) {
+		DEBUG_NET_WARN_ON_ONCE(1);
+		return -EINVAL;
+	}
 
 	/* non-first fragments have no transport header to translate */
 	if (unlikely(!first_frag))
