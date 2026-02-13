@@ -559,13 +559,13 @@ static int ipxl_v4_icmp_inner_need_pull(const struct ipxl_pkt_ctx *ctx,
 static int ipxl_v4_parse_need_pull(const struct ipxl_pkt_ctx *ctx,
 				   struct sk_buff *skb)
 {
+	bool is_icmp_err, src_invalid, dst_invalid, udp_zero_reject;
 	unsigned char l3_buf[sizeof(struct iphdr) + MAX_IPOPTLEN];
 	struct ipxl_cb *cb = ipxl_skb_cb(skb);
 	int l3_len, l4_len, pull_len;
 	unsigned int l3_off, l4_off;
 	const struct iphdr *l3_hdr;
 	enum ipxl_srr_state srr;
-	bool is_icmp_err, src_invalid, dst_invalid, udp_zero_reject;
 
 	l3_off = skb_network_offset(skb);
 	/* get the actual length of the IP header including option */

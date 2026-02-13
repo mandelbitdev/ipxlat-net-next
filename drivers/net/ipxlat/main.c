@@ -9,10 +9,13 @@
 #include <linux/slab.h>
 #include <linux/version.h>
 
+#include <net/ip.h>
+
 #include "log.h"
 #include "address.h"
 #include "main.h"
 #include "netlink.h"
+#include "packet.h"
 #include "rfc7915.h"
 #include "translation_state.h"
 
@@ -21,6 +24,16 @@ MODULE_DESCRIPTION("IPv6-IPv4 packet translation virtual device (RFC 7915)");
 MODULE_LICENSE("GPL v2");
 
 #define DRV_NAME "ipxlat"
+
+static unsigned int ipxl_frag_dst_get_mtu(const struct dst_entry *dst)
+{
+	return dst->dev->mtu;
+}
+
+static struct dst_ops ipxl_frag_dst_ops = {
+	.family = AF_UNSPEC,
+	.mtu = ipxl_frag_dst_get_mtu,
+};
 
 static const struct ipxl_cfg ipxl_cfg_defaults = {
 	/* 64:ff9b::/96 */
@@ -103,15 +116,45 @@ static void ipxl_forward_pkt(struct ipxl_priv *ipxl, struct sk_buff *skb)
 	}
 }
 
-static int ipxl_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static int ipxl_46_frag_output(struct net *net, struct sock *sk,
+			       struct sk_buff *skb);
+
+/* this pattern is used at least twice in the kernel:
+ * - ovs_fragment()
+ * - sch_fragment()
+ */
+static int ipxl_46_do_fragment(struct ipxl_priv *ipxl, struct sk_buff *skb,
+			       __u16 frag_max_size)
 {
-	struct ipxl_priv *ipxl = netdev_priv(dev);
+	struct rtable ipxl_rt = { 0 };
+	unsigned long orig_dst;
+	int err;
+
+	dst_init(&ipxl_rt.dst, &ipxl_frag_dst_ops, NULL,
+		 DST_OBSOLETE_NONE, DST_NOCOUNT);
+	ipxl_rt.dst.dev = ipxl->dev;
+
+	orig_dst = skb->_skb_refdst;
+	skb_dst_set_noref(skb, &ipxl_rt.dst);
+
+	memset(IPCB(skb), 0, sizeof(struct inet_skb_parm));
+	IPCB(skb)->frag_max_size = frag_max_size;
+
+	err = ip_do_fragment(dev_net(ipxl->dev), skb->sk, skb,
+			     ipxl_46_frag_output);
+	refdst_drop(orig_dst);
+
+	return err;
+}
+
+static int ipxl_process_skb(struct ipxl_priv *ipxl, struct sk_buff *skb,
+			    bool allow_pre_frag)
+{
 	enum ipxl_xlat_action action;
 	const struct ipxl_cfg *cfg;
 	struct ipxl_pkt_ctx ctx;
+	__u16 frag_max_size;
 	int err;
-
-	log_debug("Received a packet.");
 
 	rcu_read_lock();
 	cfg = rcu_dereference(ipxl->cfg);
@@ -119,30 +162,66 @@ static int ipxl_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		rcu_read_unlock();
 		atomic64_inc(&ipxl->dropped);
 		kfree_skb(skb);
-		return NETDEV_TX_OK;
+		return -ENODEV;
 	}
 
-	ctx.dev = dev;
+	ctx.dev = ipxl->dev;
 	ctx.cfg = cfg;
 	action = ipxl_xlat(&ctx, skb);
 	switch (action) {
 	case IPXL_XLAT_ACT_FWD:
 		rcu_read_unlock();
 		ipxl_forward_pkt(ipxl, skb);
-		return NETDEV_TX_OK;
+		return 0;
+	case IPXL_XLAT_ACT_PRE_FRAG:
+		frag_max_size = ipxl_skb_cb(skb)->frag_max_size;
+		rcu_read_unlock();
+		/* if this is already a pre-fragmented packet, bail out */
+		if (unlikely(!allow_pre_frag)) {
+			atomic64_inc(&ipxl->dropped);
+			kfree_skb(skb);
+			return -ELOOP;
+		}
+
+		err = ipxl_46_do_fragment(ipxl, skb, frag_max_size);
+		if (unlikely(err))
+			atomic64_inc(&ipxl->dropped);
+		return err;
 	case IPXL_XLAT_ACT_ICMP_ERR:
 		err = ipxl_emit_icmp_error(&ctx, skb);
 		rcu_read_unlock();
 		if (unlikely(err))
 			atomic64_inc(&ipxl->dropped);
-		break;
+		kfree_skb(skb);
+		return err;
 	case IPXL_XLAT_ACT_DROP:
 		rcu_read_unlock();
 		atomic64_inc(&ipxl->dropped);
-		break;
+		kfree_skb(skb);
+		return -EINVAL;
 	}
 
+	rcu_read_unlock();
+	atomic64_inc(&ipxl->dropped);
 	kfree_skb(skb);
+	return -EINVAL;
+}
+
+static int ipxl_46_frag_output(struct net *net, struct sock *sk,
+			       struct sk_buff *skb)
+{
+	struct ipxl_priv *ipxl = netdev_priv(skb->dev);
+
+	log_debug("Processing a prefragmented packet.");
+	return ipxl_process_skb(ipxl, skb, false);
+}
+
+static int ipxl_start_xmit(struct sk_buff *skb, struct net_device *dev)
+{
+	struct ipxl_priv *ipxl = netdev_priv(dev);
+
+	log_debug("Received a packet.");
+	ipxl_process_skb(ipxl, skb, true);
 	return NETDEV_TX_OK;
 }
 

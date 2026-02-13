@@ -15,6 +15,7 @@
 #include <linux/minmax.h>
 
 #include <net/ip.h>
+#include <net/ip6_route.h>
 #include <net/ip6_checksum.h>
 #include <net/icmp.h>
 #include <net/udp.h>
@@ -190,6 +191,12 @@ static __sum16 update_csum_4to6(__sum16 csum16, const struct iphdr *in_ip4,
 	return csum_fold(csum);
 }
 
+/* TODO: Revisit pool6791v4 source-address operational model.
+ * __icmp_send_force lets us emit ICMPv4 with a forced translator source that
+ * might not be locally assigned. This can require routing exceptions.
+ * Prefer documenting or enforcing that pool6791v4 is locally owned/routable by
+ * the translator.
+ */
 static void ipxl_46_icmp_err(const struct ipxl_pkt_ctx *ctx,
 			     struct sk_buff *inner)
 {
@@ -297,23 +304,18 @@ static enum ipxl_xlat_action ipxl_failed_action(struct sk_buff *skb)
 enum ipxl_xlat_action ipxl_xlat(const struct ipxl_pkt_ctx *ctx,
 				struct sk_buff *skb)
 {
-	enum ipxl_xlat_action action;
 	__u16 proto = ntohs(skb->protocol);
 
 	memset(skb->cb, 0, sizeof(struct ipxl_cb));
 
 	if (proto == ETH_P_IPV6)
-		action = ipxl_xlat_64(ctx, skb);
+		return ipxl_xlat_64(ctx, skb);
 	else if (proto == ETH_P_IP)
-		action = ipxl_xlat_46(ctx, skb);
-	else
-		action = IPXL_XLAT_ACT_DROP;
-
-	if (unlikely(action == IPXL_XLAT_ACT_DROP && proto != ETH_P_IPV6 &&
-		     proto != ETH_P_IP))
+		return ipxl_xlat_46(ctx, skb);
+	else {
 		netdev_dbg(ctx->dev, "Unsupported L3 proto: %u", proto);
-
-	return action;
+		return IPXL_XLAT_ACT_DROP;
+	}
 }
 
 int ipxl_emit_icmp_error(const struct ipxl_pkt_ctx *ctx, struct sk_buff *inner)
@@ -1982,14 +1984,96 @@ static int ipxl_icmp4_to_icmp6(const struct ipxl_pkt_ctx *ctx,
 					skb_transport_offset(skb), false);
 }
 
+static unsigned int ipxl_v4_to_v6_pmtu(const struct ipxl_pkt_ctx *ctx,
+				       const struct sk_buff *skb,
+				       const struct iphdr *in4)
+{
+	struct flowi6 fl6 = {};
+	struct dst_entry *dst;
+	unsigned int mtu6;
+
+	siit46_addr(&ctx->cfg->pool6, in4->saddr, &fl6.saddr);
+	siit46_addr(&ctx->cfg->pool6, in4->daddr, &fl6.daddr);
+	fl6.flowi6_mark = skb->mark;
+
+	dst = ip6_route_output(dev_net(ctx->dev), NULL, &fl6);
+	if (unlikely(dst->error)) {
+		mtu6 = ctx->dev->mtu;
+		goto out;
+	}
+
+	/* Route lookup can return a very large MTU (eg, local/loopback style
+	 * routes) that does not reflect the translator egress constraint.
+	 * Clamp with the translator device MTU so DF decisions are stable and
+	 * pre-fragment planning never targets packets larger than what this
+	 * interface can hand to the next stages.
+	 */
+	mtu6 = min_t(unsigned int, dst_mtu(dst), ctx->dev->mtu);
+
+out:
+	dst_release(dst);
+	return mtu6;
+}
+
+/* check if the incoming IPv4 packet needs pre-fragmentation to be translated
+ * and forwarded as a set of IPv6 packets */
+static int ipxl_v4_prefrag_plan(const struct ipxl_pkt_ctx *ctx,
+				struct sk_buff *skb)
+{
+	unsigned int pmtu6, threshold6, pkt_len6, pkt_len4, frag_max_size;
+	struct ipxl_cb *cb = ipxl_skb_cb(skb);
+	const struct iphdr *in4 = ip_hdr(skb);
+	unsigned int old_l3_len, new_l3_len;
+	int frag_l3_delta, l3_delta;
+
+	if (unlikely(cb->frag_max_size)) {
+		DEBUG_NET_WARN_ON_ONCE(1);
+		cb->frag_max_size = 0;
+	}
+
+	pkt_len4 = iph_totlen(skb, in4);
+	old_l3_len = cb->l3_hdr_len;
+	new_l3_len = sizeof(struct ipv6hdr) +
+		     (ip_is_fragment(in4) ? sizeof(struct frag_hdr) : 0);
+	l3_delta = (int)new_l3_len - (int)old_l3_len;
+	pkt_len6 = pkt_len4 + l3_delta;
+	pmtu6 = ipxl_v4_to_v6_pmtu(ctx, skb, in4);
+	/* DF packets are never locally pre-fragmented */
+	if (likely(is_df_set(in4))) {
+		/* If we're not allowed to fragment but translation would
+		 * exceed the next-hop MTU on the IPv6 side, emit ICMPv4
+		 * FRAG_NEEDED.
+		 * Incoming ICMPv4 errors are exempt: they proceed to the
+		 * ICMP error squeeze/trim path.
+		 */
+		if (unlikely(pkt_len6 > pmtu6 &&
+			     !(cb->flags & IPXLAT_SKB_F_IN_ICMP_ERR)))
+			return ipxl_drop_icmp(ctx, skb, ICMP_DEST_UNREACH,
+					      ICMP_FRAG_NEEDED,
+					      pmtu6 > 20 ? pmtu6 - 20 : 0);
+
+		return 0;
+	}
+
+	threshold6 = min(pmtu6, ctx->cfg->lowest_ipv6_mtu);
+	if (likely(pkt_len6 <= threshold6))
+		return 0;
+
+	frag_l3_delta =
+		(int)(sizeof(struct ipv6hdr) + sizeof(struct frag_hdr)) -
+		(int)old_l3_len;
+	frag_max_size = threshold6 - frag_l3_delta;
+	cb->frag_max_size = min_t(unsigned int, frag_max_size, IP_MAX_MTU);
+	return 0;
+}
+
 static int ipxl_v4_to_v6_inplace(const struct ipxl_pkt_ctx *ctx,
 				 struct sk_buff *skb)
 {
-	unsigned int ip4_len, ip6_len, min_l4_len, tot_len4;
-	unsigned int pmtu6, threshold6, pkt_len6;
+	unsigned int ip4_len, ip6_len, min_l4_len;
 	struct ipxl_cb *cb = ipxl_skb_cb(skb);
 	const struct iphdr in4 = *ip_hdr(skb);
-	bool first_frag, is_icmp_err, need_frag, df;
+	bool first_frag, need_frag;
 	struct frag_hdr *fh6;
 	struct ipv6hdr *iph6;
 	int delta, err;
@@ -1997,45 +2081,9 @@ static int ipxl_v4_to_v6_inplace(const struct ipxl_pkt_ctx *ctx,
 
 	/* snapshot the original IPv4 header fields before skb layout changes */
 	ip4_len = in4.ihl << 2;
-	tot_len4 = iph_totlen(skb, &in4);
 	l4_proto = cb->l4_proto;
-	df = in4.frag_off & htons(IP_DF);
 	first_frag = !(in4.frag_off & htons(IP_OFFSET));
-	is_icmp_err = cb->flags & IPXLAT_SKB_F_IN_ICMP_ERR;
 	need_frag = ip_is_fragment(&in4);
-
-	/* evaluate IPv6 size against PMTU and local threshold policy */
-	/* TODO: derive PMTU from a post-translation IPv6 route lookup. */
-	pmtu6 = ctx->dev->mtu;
-	pkt_len6 = tot_len4 + 20;
-	/* RFC7915 §4.1:
-	 * If the DF bit is set and the MTU of the next-hop interface is less
-	 * than the total length value of the IPv4 packet plus 20, the
-	 * translator MUST send an ICMPv4 "Fragmentation Needed" error message
-	 * to the IPv4 source address.
-	 */
-	/* ICMPv4 errors can be squeezed/truncated later during 4->6 ICMP
-	 * translation, so do not trigger the generic DF+PMTU early drop here.
-	 */
-	if (unlikely(df && pmtu6 < pkt_len6 && !is_icmp_err))
-		return ipxl_drop_icmp(ctx, skb, ICMP_DEST_UNREACH,
-				      ICMP_FRAG_NEEDED,
-				      pmtu6 > 20 ? pmtu6 - 20 : 0);
-
-	if (unlikely(!df)) {
-		threshold6 = min(pmtu6, ctx->cfg->lowest_ipv6_mtu);
-		/* TODO: implement fragmentation
-		 * - §1.4 (non-DF): the translator MUST [...] fragment the
-		 *   packet when the packet size exceeds the MTU of the
-		 *   next-hop interface.
-		 * - §4.1 (non-DF): if translated packet exceeds
-		 *   lowest-ipv6-mtu, translator SHOULD fragment.
-		 */
-		if (unlikely(pkt_len6 > threshold6))
-			netdev_dbg(ctx->dev,
-				   "4->6: len=%u exceeds threshold6=%u; local fragmentation disabled\n",
-				   pkt_len6, threshold6);
-	}
 
 	/* compute v4->v6 hdr delta and ensure writable headroom in-place */
 	ip6_len = sizeof(struct ipv6hdr) +
@@ -2136,8 +2184,15 @@ static enum ipxl_xlat_action ipxl_xlat_64(const struct ipxl_pkt_ctx *ctx,
 static enum ipxl_xlat_action ipxl_xlat_46(const struct ipxl_pkt_ctx *ctx,
 					  struct sk_buff *skb)
 {
-	if (ipxl_v4_validate(ctx, skb) ||
-	    unlikely(ipxl_v4_to_v6_inplace(ctx, skb)))
+	if (ipxl_v4_validate(ctx, skb))
+		return ipxl_failed_action(skb);
+
+	if (unlikely(ipxl_v4_prefrag_plan(ctx, skb)))
+		return ipxl_failed_action(skb);
+	if (unlikely(ipxl_skb_cb(skb)->frag_max_size))
+		return IPXL_XLAT_ACT_PRE_FRAG;
+
+	if (unlikely(ipxl_v4_to_v6_inplace(ctx, skb)))
 		return ipxl_failed_action(skb);
 
 	return IPXL_XLAT_ACT_FWD;

@@ -33,6 +33,7 @@ struct ipxl_pkt_ctx {
 enum ipxl_xlat_action {
 	IPXL_XLAT_ACT_DROP = 0,
 	IPXL_XLAT_ACT_FWD,
+	IPXL_XLAT_ACT_PRE_FRAG,
 	IPXL_XLAT_ACT_ICMP_ERR,
 };
 

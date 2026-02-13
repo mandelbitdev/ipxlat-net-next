@@ -177,6 +177,7 @@ struct ipxl_cb {
 	__u16 inner_fragh_off;
 	__u16 udp_zero_csum_len;
 	__u16 inner_udp_zero_csum_len;
+	__u16 frag_max_size;
 	__u8 l4_proto;
 	__u8 inner_l4_proto;
 	__u8 l3_hdr_len;
