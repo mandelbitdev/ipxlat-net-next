@@ -1341,8 +1341,8 @@ static int ipxl_udp4_to_udp6(struct sk_buff *skb, const struct iphdr *in4,
 	/* TODO: outer fast path can avoid this mode branch entirely by splitting
 	 * outer/inner wrappers and sharing only checksum primitives.
 	 */
-	if (!inner && (skb->ip_summed == CHECKSUM_PARTIAL ||
-		       unlikely(udp_new->check == 0))) {
+	if (!inner && skb->ip_summed == CHECKSUM_PARTIAL &&
+	    likely(udp_new->check != 0)) {
 		udp_new->check = ~udp_v6_check(skb_datagram_len(skb),
 					       &iph6->saddr, &iph6->daddr, 0);
 		return ipxl_set_partial_csum(skb,
@@ -1369,6 +1369,8 @@ static int ipxl_udp4_to_udp6(struct sk_buff *skb, const struct iphdr *in4,
 		 */
 		if (udp_new->check == 0)
 			udp_new->check = CSUM_MANGLED_0;
+		if (!inner)
+			skb->ip_summed = CHECKSUM_NONE;
 		return 0;
 	}
 
