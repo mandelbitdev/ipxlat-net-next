@@ -96,6 +96,7 @@ static void ipxl_forward_pkt(struct ipxl_priv *ipxl, struct sk_buff *skb)
 	for (; skb != NULL; skb = next) {
 		next = skb->next;
 		skb->next = NULL;
+		skb_scrub_packet(skb, false);
 		skb->dev = ipxl->dev;
 		memset(skb->cb, 0, sizeof(skb->cb));
 		gro_cells_receive(&ipxl->gro_cells, skb);
