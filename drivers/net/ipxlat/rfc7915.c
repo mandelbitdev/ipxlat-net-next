@@ -760,11 +760,10 @@ static __be16 ipxl_icmp64_compute_mtu4(const struct ipxl_pkt_ctx *ctx,
 				       const struct icmp6hdr *ic6)
 {
 	unsigned int in_mtu, out_mtu, pkt_mtu;
-	const struct dst_entry *out_dst;
 
-	out_dst = skb_dst(skb);
+	/* TODO: derive nexthop MTU from a post-translation IPv4 route lookup. */
 	in_mtu = ctx->dev->mtu;
-	out_mtu = out_dst ? dst_mtu(out_dst) : ctx->dev->mtu;
+	out_mtu = ctx->dev->mtu;
 
 	/* RFC7915 §5.2:
 	 * min((PTB_mtu - 20), mtu4_nexthop, (mtu6_nexthop - 20))
@@ -1599,13 +1598,12 @@ static int ipxl_icmp46_compute_mtu6(const struct ipxl_pkt_ctx *ctx,
 				    const struct iphdr *inner4)
 {
 	unsigned int in_mtu, out_mtu;
-	struct dst_entry *dst;
 
 	/* MTU of IPv4 nexthop */
 	in_mtu = ctx->dev->mtu;
-	dst = skb_dst(skb);
+	/* TODO: derive nexthop MTU from a post-translation IPv6 route lookup. */
 	/* MTU of IPv6 nexthop */
-	out_mtu = dst ? dst_mtu(dst) : ctx->dev->mtu;
+	out_mtu = ctx->dev->mtu;
 	out_icmp->icmp6_mtu =
 		/* in_icmp->un.frag.mtu is the MTU value carried by incoming ICMPv4 Frag Needed */
 		ipxl_icmp6_min_mtu(ctx, be16_to_cpu(in_icmp->un.frag.mtu),
@@ -2007,17 +2005,14 @@ static int ipxl_v4_to_v6_inplace(const struct ipxl_pkt_ctx *ctx,
 	need_frag = ip_is_fragment(&in4);
 
 	/* evaluate IPv6 size against PMTU and local threshold policy */
-	pmtu6 = skb_valid_dst(skb) ? dst_mtu(skb_dst(skb)) : ctx->dev->mtu;
+	/* TODO: derive PMTU from a post-translation IPv6 route lookup. */
+	pmtu6 = ctx->dev->mtu;
 	pkt_len6 = tot_len4 + 20;
 	/* RFC7915 §4.1:
 	 * If the DF bit is set and the MTU of the next-hop interface is less
 	 * than the total length value of the IPv4 packet plus 20, the
 	 * translator MUST send an ICMPv4 "Fragmentation Needed" error message
 	 * to the IPv4 source address.
-	 *
-	 * pmtu6 is usually >= IPV6_MIN_MTU, but locked IPv6 route metrics can
-	 * feed dst_mtu() with a raw RTAX_MTU value that is not clamped to the
-	 * IPv6 minimum. Keep the conversion to IPv4 MTU defensive here.
 	 */
 	/* ICMPv4 errors can be squeezed/truncated later during 4->6 ICMP
 	 * translation, so do not trigger the generic DF+PMTU early drop here.
