@@ -71,15 +71,13 @@ static int ipxl_dev_init(struct net_device *dev)
 	if (unlikely(!cfg))
 		return -ENOMEM;
 
-	rcu_assign_pointer(ipxl->cfg, cfg);
-
 	err = gro_cells_init(&ipxl->gro_cells, dev);
 	if (unlikely(err)) {
-		RCU_INIT_POINTER(ipxl->cfg, NULL);
 		kfree(cfg);
 		return err;
 	}
 
+	rcu_assign_pointer(ipxl->cfg, cfg);
 	return 0;
 }
 
@@ -102,16 +100,14 @@ static void ipxl_dev_uninit(struct net_device *dev)
 
 static void ipxl_forward_pkt(struct ipxl_priv *ipxl, struct sk_buff *skb)
 {
-	struct sk_buff *next;
+	unsigned int len;
+	int err;
 
-	for (; skb != NULL; skb = next) {
-		next = skb->next;
-		skb->next = NULL;
-		skb_scrub_packet(skb, false);
-		skb->dev = ipxl->dev;
-		memset(skb->cb, 0, sizeof(skb->cb));
-		gro_cells_receive(&ipxl->gro_cells, skb);
-	}
+	skb_scrub_packet(skb, false);
+	len = skb->len;
+	err = gro_cells_receive(&ipxl->gro_cells, skb);
+	if (likely(err == NET_RX_SUCCESS))
+		dev_dstats_rx_add(ipxl->dev, len);
 }
 
 static int ipxl_46_frag_output(struct net *net, struct sock *sk,
@@ -158,7 +154,7 @@ static int ipxl_process_skb(struct ipxl_priv *ipxl, struct sk_buff *skb,
 	cfg = rcu_dereference(ipxl->cfg);
 	if (unlikely(!cfg)) {
 		rcu_read_unlock();
-		atomic64_inc(&ipxl->dropped);
+		dev_dstats_tx_dropped(ipxl->dev);
 		kfree_skb(skb);
 		return -ENODEV;
 	}
@@ -168,6 +164,7 @@ static int ipxl_process_skb(struct ipxl_priv *ipxl, struct sk_buff *skb,
 	action = ipxl_xlat(&ctx, skb);
 	switch (action) {
 	case IPXL_XLAT_ACT_FWD:
+		dev_dstats_tx_add(ipxl->dev, skb->len);
 		rcu_read_unlock();
 		ipxl_forward_pkt(ipxl, skb);
 		return 0;
@@ -176,31 +173,31 @@ static int ipxl_process_skb(struct ipxl_priv *ipxl, struct sk_buff *skb,
 		rcu_read_unlock();
 		/* if this is already a pre-fragmented packet, bail out */
 		if (unlikely(!allow_pre_frag)) {
-			atomic64_inc(&ipxl->dropped);
+			dev_dstats_tx_dropped(ipxl->dev);
 			kfree_skb(skb);
 			return -ELOOP;
 		}
 
 		err = ipxl_46_do_fragment(ipxl, skb, frag_max_size);
 		if (unlikely(err))
-			atomic64_inc(&ipxl->dropped);
+			dev_dstats_tx_dropped(ipxl->dev);
 		return err;
 	case IPXL_XLAT_ACT_ICMP_ERR:
 		err = ipxl_emit_icmp_error(&ctx, skb);
 		rcu_read_unlock();
 		if (unlikely(err))
-			atomic64_inc(&ipxl->dropped);
+			dev_dstats_tx_dropped(ipxl->dev);
 		kfree_skb(skb);
 		return err;
 	case IPXL_XLAT_ACT_DROP:
 		rcu_read_unlock();
-		atomic64_inc(&ipxl->dropped);
+		dev_dstats_tx_dropped(ipxl->dev);
 		kfree_skb(skb);
 		return -EINVAL;
 	}
 
 	rcu_read_unlock();
-	atomic64_inc(&ipxl->dropped);
+	dev_dstats_tx_dropped(ipxl->dev);
 	kfree_skb(skb);
 	return -EINVAL;
 }
@@ -292,7 +289,7 @@ static void ipxl_setup(struct net_device *dev)
 
 	dev->netdev_ops = &ipxl_netdev_ops;
 	dev->needs_free_netdev = true;
-	dev->pcpu_stat_type = NETDEV_PCPU_STAT_TSTATS;
+	dev->pcpu_stat_type = NETDEV_PCPU_STAT_DSTATS;
 	dev->max_mtu =
 		IP_MAX_MTU - sizeof(struct ipv6hdr) - sizeof(struct iphdr);
 	dev->min_mtu = IPV6_MIN_MTU;
@@ -307,50 +304,6 @@ static void ipxl_setup(struct net_device *dev)
 	ipxl->dev = dev;
 	RCU_INIT_POINTER(ipxl->cfg, NULL);
 	mutex_init(&ipxl->cfg_lock);
-	atomic64_set(&ipxl->dropped, 0);
-}
-
-/*
- * Inherited from veth.c. I have no idea why it exists.
- *
- * 	ip link add type siit numtxqueues 5 numrxqueues 6
- *
- * results in
- *
- *	dev->num_tx_queues: 5
- *	dev->num_rx_queues: 6
- *	dev->real_num_tx_queues: 5
- *	dev->real_num_rx_queues: 6
- *
- * If numtxqueues/numrxqueues default, rtnl_create_link() uses
- * ipxl_get_num_queues() to set num_tx_queues/num_rx_queues. In my quad core,
- * this results in
- *
- *	dev->num_tx_queues: 4
- *	dev->num_rx_queues: 4
- *	dev->real_num_tx_queues: 4
- *	dev->real_num_rx_queues: 4
- *
- * Then this function downgrades the last two to 1.
- *
- * This looks like nonsense.
- */
-static int ipxl_init_queues(struct net_device *dev, struct nlattr *tb[])
-{
-	int err;
-
-	if (!tb[IFLA_NUM_TX_QUEUES] && dev->num_tx_queues > 1) {
-		err = netif_set_real_num_tx_queues(dev, 1);
-		if (err)
-			return err;
-	}
-	if (!tb[IFLA_NUM_RX_QUEUES] && dev->num_rx_queues > 1) {
-		err = netif_set_real_num_rx_queues(dev, 1);
-		if (err)
-			return err;
-	}
-
-	return 0;
 }
 
 /* https://github.com/torvalds/linux/commit/872f690341948b502c93318f806d821c5 */
@@ -380,13 +333,6 @@ static int ipxl_newlink(struct net_device *dev,
 		return err;
 
 	pr_info("Added device '%s'.\n", dev->name);
-
-	err = ipxl_init_queues(dev, tb);
-	if (err) {
-		unregister_netdevice(dev);
-		return err;
-	}
-
 	return 0;
 }
 
@@ -403,15 +349,6 @@ static void ipxl_dellink(struct net_device *dev, struct list_head *head)
 	unregister_netdevice_queue(dev, head);
 }
 
-/*
- * Inherited from veth. Seems like a reasonable implementation.
- */
-static unsigned int ipxl_get_num_queues(void)
-{
-	int queues = num_possible_cpus();
-	return (queues > 4096) ? 4096 : queues;
-}
-
 static struct rtnl_link_ops ipxl_link_ops = {
 	.kind = DRV_NAME,
 	.priv_size = sizeof(struct ipxl_priv),
@@ -426,9 +363,6 @@ static struct rtnl_link_ops ipxl_link_ops = {
 	 * The kernel seems to only use this incidentally (as an ugly hack),
 	 * and has no meaning in SIIT anyway.
 	 */
-
-	.get_num_tx_queues = ipxl_get_num_queues,
-	.get_num_rx_queues = ipxl_get_num_queues,
 };
 
 bool ipxl_dev_is_valid(const struct net_device *dev)

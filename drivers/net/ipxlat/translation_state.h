@@ -22,7 +22,6 @@ struct ipxl_priv {
 	struct ipxl_cfg __rcu *cfg;
 	struct mutex cfg_lock;
 	struct gro_cells gro_cells;
-	atomic64_t dropped;
 };
 
 struct ipxl_pkt_ctx {
