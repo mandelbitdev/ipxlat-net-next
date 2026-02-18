@@ -297,6 +297,10 @@ static void ipxl_setup(struct net_device *dev)
 		IP_MAX_MTU - sizeof(struct ipv6hdr) - sizeof(struct iphdr);
 	dev->min_mtu = IPV6_MIN_MTU;
 	dev->mtu = ETH_DATA_LEN;
+	/* Keep skb->dst up to ndo_start_xmit(); we may need routing context
+	 * later when generating ICMP errors on translated packets.
+	 */
+	netif_keep_dst(dev);
 
 	SET_NETDEV_DEVTYPE(dev, &ipxl_type);
 

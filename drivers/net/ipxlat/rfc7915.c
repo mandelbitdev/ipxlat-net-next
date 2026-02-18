@@ -191,23 +191,31 @@ static __sum16 update_csum_4to6(__sum16 csum16, const struct iphdr *in_ip4,
 	return csum_fold(csum);
 }
 
-/* TODO: Revisit pool6791v4 source-address operational model.
- * __icmp_send_force lets us emit ICMPv4 with a forced translator source that
- * might not be locally assigned. This can require routing exceptions.
- * Prefer documenting or enforcing that pool6791v4 is locally owned/routable by
- * the translator.
- */
 static void ipxl_46_icmp_err(const struct ipxl_pkt_ctx *ctx,
 			     struct sk_buff *inner)
 {
 	struct inet_skb_parm parm = { 0 };
+	const struct iphdr *iph;
 	struct ipxl_cb *cb;
+	int reason;
+	__u16 info;
+	__u8 type;
+	__u8 code;
 
 	cb = ipxl_skb_cb(inner);
+	type = cb->icmp_err.type;
+	code = cb->icmp_err.code;
+	info = cb->icmp_err.info;
+	if (unlikely(!skb_dst(inner))) {
+		iph = ip_hdr(inner);
+		reason = ip_route_input_noref(inner, iph->daddr, iph->saddr,
+					      ip4h_dscp(iph), inner->dev);
+		if (unlikely(reason))
+			return;
+	}
+
 	log_debug("Sending ICMPv4 error.");
-	__icmp_send_force(inner, cb->icmp_err.type, cb->icmp_err.code,
-			  htonl(cb->icmp_err.info), &parm,
-			  ctx->cfg->pool6791v4.s_addr);
+	__icmp_send(inner, type, code, htonl(info), &parm);
 }
 
 static __u8 nexthdr2proto(__u8 nexthdr)
