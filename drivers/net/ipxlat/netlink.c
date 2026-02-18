@@ -404,7 +404,6 @@ int ipxlat_nl_dev_set_doit(struct sk_buff *skb, struct genl_info *info)
 		}
 	}
 
-	ipxl_cfg_refresh_derived(cfg_new);
 	rcu_assign_pointer(ctx->ipxl->cfg, cfg_new);
 	mutex_unlock(&ctx->ipxl->cfg_lock);
 

@@ -42,7 +42,6 @@ struct ipxl_cfg {
 
 	struct in6_addr pool6791v6;
 	struct in_addr pool6791v4;
-	struct in6_addr icmp6err_saddr;
 
 	/*
 	 * Smallest reachable IPv6 MTU.

@@ -12,7 +12,6 @@
 #include <net/ip.h>
 
 #include "log.h"
-#include "address.h"
 #include "main.h"
 #include "netlink.h"
 #include "packet.h"
@@ -72,7 +71,6 @@ static int ipxl_dev_init(struct net_device *dev)
 	if (unlikely(!cfg))
 		return -ENOMEM;
 
-	ipxl_cfg_refresh_derived(cfg);
 	rcu_assign_pointer(ipxl->cfg, cfg);
 
 	err = gro_cells_init(&ipxl->gro_cells, dev);
@@ -262,16 +260,6 @@ int ipxl_prefix6_validate(const struct ipv6_prefix *prefix)
 	}
 
 	return 0;
-}
-
-void ipxl_cfg_refresh_derived(struct ipxl_cfg *cfg)
-{
-	if (!ipv6_addr_any(&cfg->pool6791v6)) {
-		cfg->icmp6err_saddr = cfg->pool6791v6;
-		return;
-	}
-
-	siit46_addr(&cfg->pool6, cfg->pool6791v4.s_addr, &cfg->icmp6err_saddr);
 }
 
 static const struct net_device_ops ipxl_netdev_ops = {

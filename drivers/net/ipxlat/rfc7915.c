@@ -285,7 +285,11 @@ static void ipxl_64_icmp_err(const struct ipxl_pkt_ctx *ctx,
 	type = cb->icmp_err.type;
 	code = cb->icmp_err.code;
 	info = cb->icmp_err.info;
-	saddr = ctx->cfg->icmp6err_saddr;
+	if (!ipv6_addr_any(&ctx->cfg->pool6791v6))
+		saddr = ctx->cfg->pool6791v6;
+	else
+		siit46_addr(&ctx->cfg->pool6, ctx->cfg->pool6791v4.s_addr,
+			    &saddr);
 	icmp6_send(inner, type, code, info, &saddr, &parm);
 }
 
