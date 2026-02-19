@@ -9,11 +9,7 @@
 #define _NET_IPXLAT_MAIN_H_
 
 #include <linux/netdevice.h>
-#include <linux/types.h>
-
-#include "types.h"
 
 bool ipxl_dev_is_valid(const struct net_device *dev);
-int ipxl_prefix6_validate(const struct ipv6_prefix *prefix);
 
 #endif /* _NET_IPXLAT_MAIN_H_ */

@@ -7,7 +7,6 @@
 
 #include <linux/module.h>
 #include <linux/slab.h>
-#include <linux/version.h>
 
 #include <net/ip.h>
 
@@ -49,23 +48,14 @@ static const struct ipxl_cfg ipxl_cfg_defaults = {
 	.compute_udp_csum_zero = false,
 };
 
-static int ipxl_open(struct net_device *dev)
-{
-	netif_start_queue(dev);
-	return 0;
-}
-
-static int ipxl_stop(struct net_device *dev)
-{
-	netif_stop_queue(dev);
-	return 0;
-}
-
 static int ipxl_dev_init(struct net_device *dev)
 {
 	struct ipxl_priv *ipxl = netdev_priv(dev);
 	struct ipxl_cfg *cfg;
 	int err;
+
+	ipxl->dev = dev;
+	mutex_init(&ipxl->cfg_lock);
 
 	cfg = kmemdup(&ipxl_cfg_defaults, sizeof(*cfg), GFP_KERNEL);
 	if (unlikely(!cfg))
@@ -220,50 +210,9 @@ static int ipxl_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	return NETDEV_TX_OK;
 }
 
-static __u32 addr6_get_bit(const struct in6_addr *addr, unsigned int pos)
-{
-	__u32 quadrant; /* As in, @addr has 4 "quadrants" of 32 bits each. */
-	__u32 mask;
-
-	/* "pos >> 5" is a more efficient version of "pos / 32". */
-	quadrant = be32_to_cpu(addr->s6_addr32[pos >> 5]);
-	/* "pos & 0x1FU" is a more efficient version of "pos % 32". */
-	mask = 1U << (31 - (pos & 0x1FU));
-
-	return quadrant & mask;
-}
-
-int ipxl_prefix6_validate(const struct ipv6_prefix *prefix)
-{
-	unsigned int i;
-
-	if (prefix->len != 32 && prefix->len != 40 && prefix->len != 48 &&
-	    prefix->len != 56 && prefix->len != 64 && prefix->len != 96) {
-		pr_err("Unsupported RFC6052 prefix length: %u.\n", prefix->len);
-		return -EINVAL;
-	}
-
-	if (prefix->len > 128) {
-		pr_err("Prefix length %u is too high.\n", prefix->len);
-		return -EINVAL;
-	}
-
-	for (i = prefix->len; i < 128; i++) {
-		if (addr6_get_bit(&prefix->addr, i)) {
-			pr_err("'%pI6c/%u' seems to have a suffix; please fix.\n",
-			       &prefix->addr, prefix->len);
-			return -EINVAL;
-		}
-	}
-
-	return 0;
-}
-
 static const struct net_device_ops ipxl_netdev_ops = {
 	.ndo_init = ipxl_dev_init,
 	.ndo_uninit = ipxl_dev_uninit,
-	.ndo_open = ipxl_open,
-	.ndo_stop = ipxl_stop,
 	.ndo_start_xmit = ipxl_start_xmit,
 };
 
@@ -273,14 +222,15 @@ static const struct device_type ipxl_type = {
 
 static void ipxl_setup(struct net_device *dev)
 {
-	struct ipxl_priv *ipxl = netdev_priv(dev);
 	netdev_features_t feat = NETIF_F_SG | NETIF_F_FRAGLIST |
-				 NETIF_F_HW_CSUM | NETIF_F_RXCSUM |
-				 NETIF_F_HIGHDMA | NETIF_F_GSO_SOFTWARE;
+				 NETIF_F_HW_CSUM | NETIF_F_HIGHDMA |
+				 NETIF_F_GSO_SOFTWARE;
 
 	dev->type = ARPHRD_NONE;
-	dev->flags |= IFF_NOARP;
+	dev->flags = IFF_NOARP;
 	dev->priv_flags |= IFF_NO_QUEUE;
+	dev->hard_header_len = 0;
+	dev->addr_len = 0;
 
 	dev->lltx = true;
 	dev->features |= feat;
@@ -300,69 +250,12 @@ static void ipxl_setup(struct net_device *dev)
 	netif_keep_dst(dev);
 
 	SET_NETDEV_DEVTYPE(dev, &ipxl_type);
-
-	ipxl->dev = dev;
-	RCU_INIT_POINTER(ipxl->cfg, NULL);
-	mutex_init(&ipxl->cfg_lock);
-}
-
-/* https://github.com/torvalds/linux/commit/872f690341948b502c93318f806d821c5 */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 11, 0)
-#define NLA_STRCPY nla_strscpy
-#else
-#define NLA_STRCPY nla_strlcpy
-#endif
-
-/*
- * Simplified version of veth's newlink.
- */
-static int ipxl_newlink(struct net_device *dev,
-			struct rtnl_newlink_params *params,
-			struct netlink_ext_ack *extack)
-{
-	struct nlattr **tb = params->tb;
-	int err;
-
-	if (tb[IFLA_IFNAME])
-		NLA_STRCPY(dev->name, tb[IFLA_IFNAME], IFNAMSIZ);
-	else
-		snprintf(dev->name, IFNAMSIZ, DRV_NAME "%%d");
-
-	err = register_netdevice(dev);
-	if (err < 0)
-		return err;
-
-	pr_info("Added device '%s'.\n", dev->name);
-	return 0;
-}
-
-/*
- * Inherited from veth. Not actually needed; if dellink is NULL,
- * __rtnl_link_register() automatically sets it as unregister_netdevice_queue().
- *
- * TODO If you don't add anything, probably delete this function on pr_info()
- * purge day.
- */
-static void ipxl_dellink(struct net_device *dev, struct list_head *head)
-{
-	pr_info("Removing device '%s'.\n", dev->name);
-	unregister_netdevice_queue(dev, head);
 }
 
 static struct rtnl_link_ops ipxl_link_ops = {
 	.kind = DRV_NAME,
 	.priv_size = sizeof(struct ipxl_priv),
 	.setup = ipxl_setup,
-	.newlink = ipxl_newlink,
-	.dellink = ipxl_dellink,
-
-	/* nlargs not needed for now, so .policy and .maxtype excluded */
-
-	/*
-	 * It seems veth uses .get_link_net to return the peer dev's namespace.
-	 * The kernel seems to only use this incidentally (as an ugly hack),
-	 * and has no meaning in SIIT anyway.
-	 */
 };
 
 bool ipxl_dev_is_valid(const struct net_device *dev)

@@ -232,12 +232,54 @@ int ipxlat_nl_dev_get_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
 	return skb->len;
 }
 
+static __u32 ipxl_addr6_get_bit(const struct in6_addr *addr, unsigned int pos)
+{
+	__u32 quadrant;
+	__u32 mask;
+
+	quadrant = be32_to_cpu(addr->s6_addr32[pos >> 5]);
+	mask = 1U << (31 - (pos & 0x1FU));
+
+	return quadrant & mask;
+}
+
+static int ipxl_nl_validate_pool6(const struct ipv6_prefix *prefix,
+				  struct netlink_ext_ack *extack)
+{
+	unsigned int i;
+
+	if (prefix->len != 32 && prefix->len != 40 && prefix->len != 48 &&
+	    prefix->len != 56 && prefix->len != 64 && prefix->len != 96) {
+		NL_SET_ERR_MSG_FMT_MOD(extack,
+				       "unsupported RFC6052 prefix length: %u",
+				       prefix->len);
+		return -EINVAL;
+	}
+
+	if (prefix->len > 128) {
+		NL_SET_ERR_MSG_FMT_MOD(extack,
+				       "prefix length %u is too high",
+				       prefix->len);
+		return -EINVAL;
+	}
+
+	for (i = prefix->len; i < 128; i++) {
+		if (unlikely(ipxl_addr6_get_bit(&prefix->addr, i))) {
+			NL_SET_ERR_MSG_FMT_MOD(extack,
+					       "'%pI6c/%u' has non-zero host bits",
+					       &prefix->addr, prefix->len);
+			return -EINVAL;
+		}
+	}
+
+	return 0;
+}
+
 static int ipxl_nl_parse_pool6(struct nlattr *attr, struct ipv6_prefix *pool6,
 			       struct netlink_ext_ack *extack)
 {
 	struct nlattr *attrs_pool[IPXLAT_A_POOL_MAX + 1];
 	struct ipv6_prefix new_pool6;
-	struct in6_addr masked;
 	int ret;
 
 	new_pool6 = *pool6;
@@ -260,18 +302,7 @@ static int ipxl_nl_parse_pool6(struct nlattr *attr, struct ipv6_prefix *pool6,
 		new_pool6.len =
 			nla_get_u8(attrs_pool[IPXLAT_A_POOL_PREFIX_LEN]);
 
-	/* masked = pfx->addr with host bits cleared */
-	ipv6_addr_prefix(&masked, &new_pool6.addr, new_pool6.len);
-
-	/* if they differ, there were host bits set */
-	if (!ipv6_addr_equal(&new_pool6.addr, &masked)) {
-		NL_SET_ERR_MSG_FMT_MOD(extack,
-				       "'%pI6c/%u' has non-zero host bits",
-				       &new_pool6.addr, new_pool6.len);
-		return -EINVAL;
-	}
-
-	ret = ipxl_prefix6_validate(&new_pool6);
+	ret = ipxl_nl_validate_pool6(&new_pool6, extack);
 	if (ret) {
 		if (attrs_pool[IPXLAT_A_POOL_PREFIX_LEN])
 			NL_SET_BAD_ATTR(extack,
