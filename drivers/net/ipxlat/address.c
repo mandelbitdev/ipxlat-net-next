@@ -6,7 +6,6 @@
  */
 
 #include "address.h"
-#include "log.h"
 
 static inline bool prefix6_contains(const struct ipv6_prefix *prefix,
 				    const struct in6_addr *addr)
@@ -14,7 +13,7 @@ static inline bool prefix6_contains(const struct ipv6_prefix *prefix,
 	return ipv6_prefix_equal(&prefix->addr, addr, prefix->len);
 }
 
-static __be32 addr64(struct in6_addr const *src, unsigned int q1,
+static __be32 addr64(const struct in6_addr *src, unsigned int q1,
 		     unsigned int q2, unsigned int q3, unsigned int q4)
 {
 	q1 = src->s6_addr[q1];
@@ -27,15 +26,16 @@ static __be32 addr64(struct in6_addr const *src, unsigned int q1,
 static void addr46(__be32 __src, struct in6_addr *dst, unsigned int q1,
 		   unsigned int q2, unsigned int q3, unsigned int q4)
 {
-	__u32 src = ntohl(__src);
+	u32 src = ntohl(__src);
+
 	dst->s6_addr[q1] = ((src >> 24) & 0xFF);
 	dst->s6_addr[q2] = ((src >> 16) & 0xFF);
 	dst->s6_addr[q3] = ((src >> 8) & 0xFF);
 	dst->s6_addr[q4] = ((src) & 0xFF);
 }
 
-void siit46_addr(const struct ipv6_prefix *pool6, __be32 addr4,
-		 struct in6_addr *addr6)
+void ipxl_addr_46(const struct ipv6_prefix *pool6, __be32 addr4,
+		  struct in6_addr *addr6)
 {
 	*addr6 = pool6->addr;
 
@@ -63,21 +63,20 @@ void siit46_addr(const struct ipv6_prefix *pool6, __be32 addr4,
 	DEBUG_NET_WARN_ON_ONCE(1);
 }
 
-int siit64_addrs(const struct ipxl_cfg *cfg, const struct ipv6hdr *hdr6,
-		 bool icmp_err, __be32 *src, __be32 *dst)
+int ipxl_addrs_64(const struct ipxl_cfg *cfg, const struct ipv6hdr *hdr6,
+		  bool icmp_err, __be32 *src, __be32 *dst)
 {
 	const struct ipv6_prefix *pool6 = &cfg->pool6;
-	bool src_ok;
+	const bool src_ok = prefix6_contains(pool6, &hdr6->saddr);
 
-	src_ok = prefix6_contains(pool6, &hdr6->saddr);
 	if (unlikely(!src_ok && !icmp_err)) {
-		log_debug("%pI6c/%u does not contain %pI6c.", &pool6->addr,
-			  pool6->len, &hdr6->saddr);
+		pr_debug("ipxlat: %pI6c/%u does not contain %pI6c.\n",
+			 &pool6->addr, pool6->len, &hdr6->saddr);
 		return -EINVAL;
 	}
 	if (unlikely(!prefix6_contains(pool6, &hdr6->daddr))) {
-		log_debug("%pI6c/%u does not contain %pI6c.", &pool6->addr,
-			  pool6->len, &hdr6->daddr);
+		pr_debug("ipxlat: %pI6c/%u does not contain %pI6c.\n",
+			 &pool6->addr, pool6->len, &hdr6->daddr);
 		return -EINVAL;
 	}
 
@@ -120,12 +119,5 @@ int siit64_addrs(const struct ipxl_cfg *cfg, const struct ipv6hdr *hdr6,
 	if (unlikely(!src_ok))
 		*src = cfg->pool6791v4.s_addr;
 
-	log_debug("Result: %pI4->%pI4", src, dst);
 	return 0;
-}
-
-int siit64_addrs_skb(const struct ipxl_cfg *cfg, struct sk_buff *skb,
-		     bool icmp_err, __be32 *src, __be32 *dst)
-{
-	return siit64_addrs(cfg, ipv6_hdr(skb), icmp_err, src, dst);
 }

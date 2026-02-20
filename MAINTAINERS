@@ -23996,11 +23996,11 @@ N:	sifive
 K:	fu[57]40
 K:	[^@]sifive
 
-SIIT DRIVER:
+IPXLAT DRIVER:
 M:	Antonio Quartulli <antonio@mandelbit.com>
 L:	ipv6@lists.monostack.org
 S:	Maintained
-F:	drivers/net/siit/
+F:	drivers/net/ipxlat/
 
 SILEAD TOUCHSCREEN DRIVER
 M:	Hans de Goede <hansg@kernel.org>

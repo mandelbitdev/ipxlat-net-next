@@ -22,7 +22,8 @@ const struct nla_policy ipxlat_cfg_nl_policy[IPXLAT_A_CFG_COMPUTE_UDP_CSUM_ZERO 
 
 const struct nla_policy ipxlat_pool_nl_policy[IPXLAT_A_POOL_PREFIX_LEN + 1] = {
 	[IPXLAT_A_POOL_PREFIX] = NLA_POLICY_EXACT_LEN(16),
-	[IPXLAT_A_POOL_PREFIX_LEN] = NLA_POLICY_MAX(NLA_U8, IPXLAT_POOL6_MAX_PREFIX_LEN),
+	[IPXLAT_A_POOL_PREFIX_LEN] =
+		NLA_POLICY_MAX(NLA_U8, IPXLAT_POOL6_MAX_PREFIX_LEN),
 };
 
 /* IPXLAT_CMD_DEV_GET - do */
@@ -39,27 +40,27 @@ static const struct nla_policy ipxlat_dev_set_nl_policy[IPXLAT_A_DEV_CONFIG + 1]
 /* Ops table for ipxlat */
 static const struct genl_split_ops ipxlat_nl_ops[] = {
 	{
-		.cmd		= IPXLAT_CMD_DEV_GET,
-		.pre_doit	= ipxlat_nl_pre_doit,
-		.doit		= ipxlat_nl_dev_get_doit,
-		.post_doit	= ipxlat_nl_post_doit,
-		.policy		= ipxlat_dev_get_nl_policy,
-		.maxattr	= IPXLAT_A_DEV_IFINDEX,
-		.flags		= GENL_CMD_CAP_DO,
+		.cmd = IPXLAT_CMD_DEV_GET,
+		.pre_doit = ipxlat_nl_pre_doit,
+		.doit = ipxlat_nl_dev_get_doit,
+		.post_doit = ipxlat_nl_post_doit,
+		.policy = ipxlat_dev_get_nl_policy,
+		.maxattr = IPXLAT_A_DEV_IFINDEX,
+		.flags = GENL_CMD_CAP_DO,
 	},
 	{
-		.cmd	= IPXLAT_CMD_DEV_GET,
-		.dumpit	= ipxlat_nl_dev_get_dumpit,
-		.flags	= GENL_CMD_CAP_DUMP,
+		.cmd = IPXLAT_CMD_DEV_GET,
+		.dumpit = ipxlat_nl_dev_get_dumpit,
+		.flags = GENL_CMD_CAP_DUMP,
 	},
 	{
-		.cmd		= IPXLAT_CMD_DEV_SET,
-		.pre_doit	= ipxlat_nl_pre_doit,
-		.doit		= ipxlat_nl_dev_set_doit,
-		.post_doit	= ipxlat_nl_post_doit,
-		.policy		= ipxlat_dev_set_nl_policy,
-		.maxattr	= IPXLAT_A_DEV_CONFIG,
-		.flags		= GENL_ADMIN_PERM | GENL_CMD_CAP_DO,
+		.cmd = IPXLAT_CMD_DEV_SET,
+		.pre_doit = ipxlat_nl_pre_doit,
+		.doit = ipxlat_nl_dev_set_doit,
+		.post_doit = ipxlat_nl_post_doit,
+		.policy = ipxlat_dev_set_nl_policy,
+		.maxattr = IPXLAT_A_DEV_CONFIG,
+		.flags = GENL_ADMIN_PERM | GENL_CMD_CAP_DO,
 	},
 };
 
@@ -68,13 +69,13 @@ static const struct genl_multicast_group ipxlat_nl_mcgrps[] = {
 };
 
 struct genl_family ipxlat_nl_family __ro_after_init = {
-	.name		= IPXLAT_FAMILY_NAME,
-	.version	= IPXLAT_FAMILY_VERSION,
-	.netnsok	= true,
-	.parallel_ops	= true,
-	.module		= THIS_MODULE,
-	.split_ops	= ipxlat_nl_ops,
-	.n_split_ops	= ARRAY_SIZE(ipxlat_nl_ops),
-	.mcgrps		= ipxlat_nl_mcgrps,
-	.n_mcgrps	= ARRAY_SIZE(ipxlat_nl_mcgrps),
+	.name = IPXLAT_FAMILY_NAME,
+	.version = IPXLAT_FAMILY_VERSION,
+	.netnsok = true,
+	.parallel_ops = true,
+	.module = THIS_MODULE,
+	.split_ops = ipxlat_nl_ops,
+	.n_split_ops = ARRAY_SIZE(ipxlat_nl_ops),
+	.mcgrps = ipxlat_nl_mcgrps,
+	.n_mcgrps = ARRAY_SIZE(ipxlat_nl_mcgrps),
 };

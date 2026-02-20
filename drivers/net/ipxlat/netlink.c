@@ -12,10 +12,10 @@
 
 #include <uapi/linux/ipxlat.h>
 
-#include "main.h"
 #include "netlink.h"
+#include "main.h"
 #include "netlink-gen.h"
-#include "translation_state.h"
+#include "ipxlpriv.h"
 
 /* TODO: look at net/shaper/shaper.c */
 
@@ -45,12 +45,10 @@ static struct ipxl_priv *ipxl_get_from_attrs(struct net *net,
 {
 	struct ipxl_priv *ipxl;
 	struct net_device *dev;
-	int ifindex;
+	const int ifindex = nla_get_u32(info->attrs[IPXLAT_A_DEV_IFINDEX]);
 
 	if (GENL_REQ_ATTR_CHECK(info, IPXLAT_A_DEV_IFINDEX))
 		return ERR_PTR(-EINVAL);
-
-	ifindex = nla_get_u32(info->attrs[IPXLAT_A_DEV_IFINDEX]);
 
 	rcu_read_lock();
 	dev = dev_get_by_index_rcu(net, ifindex);
@@ -114,7 +112,7 @@ static int ipxl_nl_send_dev(struct sk_buff *skb, const struct ipxl_priv *ipxl,
 
 	rcu_read_lock();
 	cfg = rcu_dereference(ipxl->cfg);
-	if (unlikely(!cfg)) {
+	if (!cfg) {
 		rcu_read_unlock();
 		return -ENODEV;
 	}
@@ -131,8 +129,7 @@ static int ipxl_nl_send_dev(struct sk_buff *skb, const struct ipxl_priv *ipxl,
 		goto err;
 
 	if (!net_eq(src_net, dev_net(ipxl->dev))) {
-		id = peernet2id_alloc(src_net, dev_net(ipxl->dev),
-				      GFP_ATOMIC);
+		id = peernet2id_alloc(src_net, dev_net(ipxl->dev), GFP_ATOMIC);
 		if (id < 0) {
 			ret = id;
 			goto err;
@@ -232,13 +229,10 @@ int ipxlat_nl_dev_get_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
 	return skb->len;
 }
 
-static __u32 ipxl_addr6_get_bit(const struct in6_addr *addr, unsigned int pos)
+static u32 ipxl_addr6_get_bit(const struct in6_addr *addr, unsigned int pos)
 {
-	__u32 quadrant;
-	__u32 mask;
-
-	quadrant = be32_to_cpu(addr->s6_addr32[pos >> 5]);
-	mask = 1U << (31 - (pos & 0x1FU));
+	const u32 quadrant = be32_to_cpu(addr->s6_addr32[pos >> 5]);
+	const u32 mask = 1U << (31 - (pos & 0x1FU));
 
 	return quadrant & mask;
 }
@@ -257,14 +251,13 @@ static int ipxl_nl_validate_pool6(const struct ipv6_prefix *prefix,
 	}
 
 	if (prefix->len > 128) {
-		NL_SET_ERR_MSG_FMT_MOD(extack,
-				       "prefix length %u is too high",
+		NL_SET_ERR_MSG_FMT_MOD(extack, "prefix length %u is too high",
 				       prefix->len);
 		return -EINVAL;
 	}
 
 	for (i = prefix->len; i < 128; i++) {
-		if (unlikely(ipxl_addr6_get_bit(&prefix->addr, i))) {
+		if (ipxl_addr6_get_bit(&prefix->addr, i)) {
 			NL_SET_ERR_MSG_FMT_MOD(extack,
 					       "'%pI6c/%u' has non-zero host bits",
 					       &prefix->addr, prefix->len);
@@ -320,9 +313,9 @@ static int ipxl_nl_parse_pool6(struct nlattr *attr, struct ipv6_prefix *pool6,
 static int ipxl_nl_validate_pool6791v4(__be32 addr,
 				       struct netlink_ext_ack *extack)
 {
-	if (unlikely(ipv4_is_zeronet(addr) || ipv4_is_loopback(addr) ||
-		     ipv4_is_multicast(addr) || ipv4_is_lbcast(addr) ||
-		     ipv4_is_linklocal_169(addr))) {
+	if (ipv4_is_zeronet(addr) || ipv4_is_loopback(addr) ||
+	    ipv4_is_multicast(addr) || ipv4_is_lbcast(addr) ||
+	    ipv4_is_linklocal_169(addr)) {
 		NL_SET_ERR_MSG_FMT_MOD(extack,
 				       "invalid pool6791v4 address: %pI4",
 				       &addr);
@@ -335,17 +328,16 @@ static int ipxl_nl_validate_pool6791v4(__be32 addr,
 static int ipxl_nl_validate_pool6791v6(const struct in6_addr *addr,
 				       struct netlink_ext_ack *extack)
 {
-	int type;
-
-	if (likely(ipv6_addr_any(addr)))
+	if (ipv6_addr_any(addr))
 		return 0;
 
-	type = ipv6_addr_type(addr);
-	if (unlikely(!(type & IPV6_ADDR_UNICAST) ||
-		     (type & IPV6_ADDR_MULTICAST) ||
-		     (type & IPV6_ADDR_LOOPBACK) ||
-		     (type & IPV6_ADDR_LINKLOCAL) ||
-		     (type & IPV6_ADDR_MAPPED))) {
+	const int addr_type = ipv6_addr_type(addr);
+
+	if (!(addr_type & IPV6_ADDR_UNICAST) ||
+	    (addr_type & IPV6_ADDR_MULTICAST) ||
+	    (addr_type & IPV6_ADDR_LOOPBACK) ||
+	    (addr_type & IPV6_ADDR_LINKLOCAL) ||
+	    (addr_type & IPV6_ADDR_MAPPED)) {
 		NL_SET_ERR_MSG_FMT_MOD(extack,
 				       "invalid pool6791v6 address: %pI6c",
 				       addr);
@@ -383,14 +375,14 @@ int ipxlat_nl_dev_set_doit(struct sk_buff *skb, struct genl_info *info)
 	}
 
 	cfg_new = kmalloc(sizeof(*cfg_new), GFP_KERNEL);
-	if (unlikely(!cfg_new))
+	if (!cfg_new)
 		return -ENOMEM;
 
 	mutex_lock(&ctx->ipxl->cfg_lock);
 	cfg_old =
 		rcu_dereference_protected(ctx->ipxl->cfg,
 					  lockdep_is_held(&ctx->ipxl->cfg_lock));
-	if (unlikely(!cfg_old)) {
+	if (!cfg_old) {
 		ret = -ENODEV;
 		goto out_unlock_free_new;
 	}
@@ -450,7 +442,7 @@ out_unlock_free_new:
 }
 
 /**
- * ipxl_nl_register - perform any needed registration in the NL subsystem
+ * ipxl_nl_register - perform any needed registration in the netlink subsystem
  *
  * Return: 0 on success, a negative error code otherwise
  */

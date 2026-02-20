@@ -13,14 +13,15 @@
 #include <uapi/linux/ipxlat.h>
 
 /* Common nested types */
-extern const struct nla_policy ipxlat_cfg_nl_policy[IPXLAT_A_CFG_COMPUTE_UDP_CSUM_ZERO + 1];
-extern const struct nla_policy ipxlat_pool_nl_policy[IPXLAT_A_POOL_PREFIX_LEN + 1];
+extern const struct nla_policy
+	ipxlat_cfg_nl_policy[IPXLAT_A_CFG_COMPUTE_UDP_CSUM_ZERO + 1];
+extern const struct nla_policy
+	ipxlat_pool_nl_policy[IPXLAT_A_POOL_PREFIX_LEN + 1];
 
 int ipxlat_nl_pre_doit(const struct genl_split_ops *ops, struct sk_buff *skb,
 		       struct genl_info *info);
-void
-ipxlat_nl_post_doit(const struct genl_split_ops *ops, struct sk_buff *skb,
-		    struct genl_info *info);
+void ipxlat_nl_post_doit(const struct genl_split_ops *ops, struct sk_buff *skb,
+			 struct genl_info *info);
 
 int ipxlat_nl_dev_get_doit(struct sk_buff *skb, struct genl_info *info);
 int ipxlat_nl_dev_get_dumpit(struct sk_buff *skb, struct netlink_callback *cb);

@@ -1,293 +1,88 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*  SIIT - Stateless IP/ICMP Translation virtual device driver
  *
  *  Copyright (C) 2024- Alberto Leiva Popper <ydahhrk@gmail.com>
  *  Copyright (C) 2025- Antonio Quartulli <antonio@mandelbit.com>
  */
 
-#ifndef _NET_SIIT_PACKET_H_
-#define _NET_SIIT_PACKET_H_
-
-/*
- * @file
- * Random packet-related functions.
- *
- * Relevant topics:
- *
- * # Packet Buffering
- *
- * GRO, nf_defrag_ipv6 and nf_defrag_ipv4 can merge a bunch of related packets
- * on input, by buffering them in `skb_shinfo(skb)->frags` or queuing them in
- * `skb_shinfo(skb)->frag_list`. Lots of kernel functions will try to fool you
- * into thinking they're a single packet.
- *
- * For the most part, this is fine. Unfortunately, individual fragment surgery
- * is sometimes necessary evil for PMTU reasons. Therefore, you need to
- * understand frags and frag_list if you're going to manipulate lengths (and
- * sometimes checksums).
- *
- * # Internal Packets
- *
- * Packets contained inside ICMP errors. A good chunk of the RFC7915 code is
- * reused by external and internal packets.
- *
- * They can be truncated. When this happens, their header lengths will
- * contradict their actual lengths. For this reason, in general, Jool should
- * rarely rely on header lengths.
- *
- * # Local Glossary
- *
- * - data payload area: Bytes that lie in an skb between skb->head and
- *   skb->tail, excluding headers.
- * - paged area: Bytes the skb stores in skb_shinfo(skb)->frags.
- * - frag_list area: Bytes the skb stores in skb_shinfo(skb)->frag_list,
- *   and *also* the bytes these fragments store in their own paged areas.
- *
- * These are all L4 payload only. The kernel deletes frags and frag_list headers
- * on input, then recreates them on output.
- *
- * - Subsequent fragment: Packet with fragment offset nonzero.
- *   (These only show up when nf_defrag_ipv* is disabled; ie. stateless
- *   translators only.)
- */
+#ifndef _NET_IPXLAT_PACKET_H_
+#define _NET_IPXLAT_PACKET_H_
 
 #include <linux/skbuff.h>
+#include <linux/build_bug.h>
 #include <net/ip.h>
 #include <net/ipv6.h>
 #include <linux/tcp.h>
-#include <linux/icmp.h>
-
-#include "types.h"
 
 struct ipxl_pkt_ctx;
-static inline struct ipxl_cb *ipxl_skb_cb(struct sk_buff const *skb)
+
+struct ipxl_cb {
+	u16 l4_off;
+	u16 payload_off;
+	u16 fragh_off;
+	u16 inner_l3_offset;
+	u16 inner_l4_offset;
+	u16 inner_fragh_off;
+	/* L4 span length (UDP header + payload bytes) to checksum when translating outer IPv4 UDP packets that arrive with checksum 0 */
+	u16 udp_zero_csum_len;
+	u16 inner_udp_zero_csum_len;
+	u16 frag_max_size;
+	u8 l4_proto;
+	u8 inner_l4_proto;
+	u8 l3_hdr_len;
+	u8 inner_l3_hdr_len;
+	bool in_icmp_err;
+	bool emit_icmp_err;
+	struct {
+		u8 type;
+		u8 code;
+		u32 info;
+	} icmp_err;
+};
+
+static inline struct ipxl_cb *ipxl_skb_cb(const struct sk_buff *skb)
 {
+	BUILD_BUG_ON(sizeof(struct ipxl_cb) > sizeof(skb->cb));
 	return (struct ipxl_cb *)(skb->cb);
 }
 
-/* Returns a hack-free version of the 'Traffic class' field from @hdr. */
-static inline __u8 get_traffic_class(struct ipv6hdr const *hdr)
+static inline unsigned int ipxl_skb_datagram_len(const struct sk_buff *skb)
 {
-	__u8 upper_bits = hdr->priority;
-	__u8 lower_bits = hdr->flow_lbl[0] >> 4;
-	return (upper_bits << 4) | lower_bits;
+	return skb->len - skb_transport_offset(skb);
 }
 
-/* Returns IP_DF if the DF flag from @hdr is set, 0 otherwise. */
-static inline __u16 is_df_set(struct iphdr const *hdr)
+int ipxl_v4_skb_validate(const struct ipxl_pkt_ctx *ctx, struct sk_buff *skb);
+int ipxl_v6_skb_validate(const struct ipxl_pkt_ctx *ctx, struct sk_buff *skb);
+
+static inline u8 ipxl_get_ipv6_tclass(const struct ipv6hdr *hdr)
 {
-	/* ntohs(iph->frag_off) & IP_DF */
-	return be16_to_cpu(hdr->frag_off) & IP_DF;
+	return (hdr->priority << 4) | (hdr->flow_lbl[0] >> 4);
 }
 
-/* Returns IP6_MF if the MF flag from @hdr is set, 0 otherwise. */
-static inline __u16 is_mf_set_ipv6(struct frag_hdr const *hdr)
-{
-	return be16_to_cpu(hdr->frag_off) & IP6_MF;
-}
-
-/* Returns IP_MF if the MF flag from @hdr is set, 0 otherwise. */
-static inline __u16 is_mf_set_ipv4(struct iphdr const *hdr)
-{
-	return be16_to_cpu(hdr->frag_off) & IP_MF;
-}
-
-/* Returns a hack-free version of the 'Fragment offset' field from @hdr. */
-static inline __u16 get_v6_frag_offset(struct frag_hdr const *hdr)
+static inline u16 ipxl_get_frag6_offset(const struct frag_hdr *hdr)
 {
 	return be16_to_cpu(hdr->frag_off) & 0xFFF8U;
 }
 
-/* Returns a hack-free version of the 'Fragment offset' field from @hdr. */
-static inline __u16 get_v4_frag_offset(struct iphdr const *hdr)
+static inline u16 ipxl_get_frag4_offset(const struct iphdr *hdr)
 {
-	__u16 frag_off = be16_to_cpu(hdr->frag_off);
-	/* 3 bit shifts to the left == multiplication by 8. */
-	return (frag_off & IP_OFFSET) << 3;
+	return (be16_to_cpu(hdr->frag_off) & IP_OFFSET) << 3;
 }
 
-/*
- * Pretends @skb's IPv6 header has a "total length" field and returns its value.
- */
-static inline unsigned int get_tot_len_ipv6(struct sk_buff const *skb)
+static inline bool ipxl_is_first_frag6(const struct frag_hdr *hdr)
 {
-	return sizeof(struct ipv6hdr) + be16_to_cpu(ipv6_hdr(skb)->payload_len);
+	return hdr ? (ipxl_get_frag6_offset(hdr) == 0) : true;
 }
 
-static inline bool is_first_frag6(struct frag_hdr const *hdr)
+static inline __be16 ipxl_build_frag6_offset(u16 frag_offset, bool mf)
 {
-	return hdr ? (get_v6_frag_offset(hdr) == 0) : true;
+	return cpu_to_be16((frag_offset & 0xFFF8U) | mf);
 }
 
-static inline bool ip6_is_fragment(struct frag_hdr const *hdr)
+static inline __be16 ipxl_build_frag4_offset(bool df, bool mf, u16 frag_offset)
 {
-	if (!hdr)
-		return false;
-	return (get_v6_frag_offset(hdr) != 0) || is_mf_set_ipv6(hdr);
+	return cpu_to_be16((df ? (1U << 14) : 0) | (mf ? (1U << 13) : 0) |
+			   (frag_offset >> 3));
 }
 
-/*
- * frag_hdr.frag_off is actually a combination of the 'More fragments' flag and
- * the 'Fragment offset' field. This function is a one-liner for creating a
- * settable frag_off.
- * Note that fragment offset is measured in units of eight-byte blocks. That
- * means that you want @frag_offset to be a multiple of 8 if you want your
- * fragmentation to work properly.
- */
-static inline __be16 build_v6_frag_offset(__u16 frag_offset, __u16 mf)
-{
-	__u16 result = (frag_offset & 0xFFF8U) | (mf ? 1U : 0U);
-	return cpu_to_be16(result);
-}
-
-/*
- * iphdr.frag_off is actually a combination of the DF flag, the MF flag and the
- * 'Fragment offset' field. This function is a one-liner for creating a settable
- * frag_off.
- * Note that fragment offset is measured in units of eight-byte blocks. That
- * means that you want @frag_offset to be a multiple of 8 if you want your
- * fragmentation to work properly.
- */
-static inline __be16 build_v4_frag_offset(bool df, __u16 mf, __u16 frag_offset)
-{
-	__u16 result = (df ? (1U << 14) : 0) | (mf ? (1U << 13) : 0) |
-		       (frag_offset >> 3);
-	return cpu_to_be16(result);
-}
-
-/*
- * Returns the size in bytes of @hdr, including options.
- * skbless variant of tcp_hdrlen().
- */
-static inline unsigned int tcp_hdr_len(struct tcphdr const *hdr)
-{
-	return hdr->doff << 2;
-}
-
-#define IPXLAT_SKB_F_INNER 0x01
-#define IPXLAT_SKB_F_IN_ICMP_ERR 0x02
-#define IPXLAT_SKB_F_OUT_ICMP_ERR 0x04
-
-struct ipxl_cb {
-	__u16 l4_off;
-	__u16 payload_off;
-	__u16 fragh_off;
-	__u16 inner_l3_offset;
-	__u16 inner_l4_offset;
-	__u16 inner_fragh_off;
-	__u16 udp_zero_csum_len;
-	__u16 inner_udp_zero_csum_len;
-	__u16 frag_max_size;
-	__u8 l4_proto;
-	__u8 inner_l4_proto;
-	__u8 l3_hdr_len;
-	__u8 inner_l3_hdr_len;
-	__u8 flags;
-	struct {
-		__u8 type;
-		__u8 code;
-		__u32 info;
-	} icmp_err;
-};
-
-/*
- * Initializes @pkt using the rest of the arguments.
- */
-static inline void pkt_fill(struct sk_buff *skb, __u8 l4_proto,
-			    struct frag_hdr *frag, void *payload)
-{
-	struct ipxl_cb *cb = ipxl_skb_cb(skb);
-
-	cb->l4_proto = l4_proto;
-	cb->flags = 0;
-	cb->l4_off = skb_transport_offset(skb);
-	cb->l3_hdr_len = skb_transport_offset(skb) - skb_network_offset(skb);
-	cb->fragh_off = frag ? ((unsigned char *)frag - skb->data) : 0;
-	cb->payload_off = (unsigned char *)payload - skb->data;
-}
-
-/* must be IPv6. */
-static inline struct frag_hdr *pkt_frag_hdr(struct sk_buff const *skb)
-{
-	unsigned int offset = ipxl_skb_cb(skb)->fragh_off;
-	return offset ? ((struct frag_hdr *)(skb->data + offset)) : NULL;
-}
-
-static inline void *pkt_payload(struct sk_buff const *skb)
-{
-	return skb->data + ipxl_skb_cb(skb)->payload_off;
-}
-
-static inline bool pkt_is_inner(struct sk_buff const *skb)
-{
-	return ipxl_skb_cb(skb)->flags & IPXLAT_SKB_F_INNER;
-}
-
-static inline unsigned int skb_l3hdr_len(struct sk_buff const *skb)
-{
-	return skb_transport_header(skb) - skb_network_header(skb);
-}
-
-/* Includes first set of layer-4 headers (including options). */
-static inline unsigned int pkt_l4hdr_len(struct sk_buff const *skb)
-{
-	return pkt_payload(skb) - (void *)skb_transport_header(skb);
-}
-
-/* Includes first set of layer-3 and layer-4 headers. */
-static inline unsigned int pkt_hdrs_len(struct sk_buff const *skb)
-{
-	return ipxl_skb_cb(skb)->payload_off;
-}
-
-/*
- * Includes headroom payload (which itself includes l4 header), frag_list
- * payload and frags payload.
- */
-static inline unsigned int skb_datagram_len(struct sk_buff const *skb)
-{
-	return skb->len - skb_l3hdr_len(skb);
-}
-
-static inline bool pkt_is_icmp6_error(struct sk_buff const *skb)
-{
-	return (ipxl_skb_cb(skb)->l4_proto == NEXTHDR_ICMP) &&
-	       icmpv6_is_err(icmp6_hdr(skb)->icmp6_type);
-}
-
-static inline bool pkt_is_icmp4_error(struct sk_buff const *skb)
-{
-	return (ipxl_skb_cb(skb)->l4_proto == IPPROTO_ICMP) &&
-	       icmp_is_err(icmp_hdr(skb)->type);
-}
-
-/*
- * Ensures @skb isn't corrupted and initializes parsing metadata in skb->cb.
- *
- * After this function, code can assume:
- * - @skb contains full l3 and l4 headers (including inner ones), their order
- *   seems to make sense, and they are all within the data area of @skb. (ie.
- *   they are not paged.)
- * - @skb's payload isn't truncated (though inner packet payload might).
- * - The pkt_* functions above can now be used on @skb.
- * - The length fields in the l3 headers can be relied upon. (But not the ones
- *   contained in inner packets.)
- *
- * Healthy layer 4 checksums and lengths are not guaranteed in general, but
- * ICMP error checksum validation required by the translation path is handled in
- * the validator.
- *
- * Also, this function does not ensure @skb is either TCP, UDP or ICMP. This is
- * because SIIT Jool must translate other protocols in a best-effort basis.
- *
- * This function can change the packet's pointers. If you eg. stored a pointer
- * to skb_network_header(skb), you will need to assign it again (by calling
- * skb_network_header() again).
- */
-int ipxl_v6_validate(const struct ipxl_pkt_ctx *ctx, struct sk_buff *skb);
-int ipxl_v4_validate(const struct ipxl_pkt_ctx *ctx, struct sk_buff *skb);
-/*
- * @}
- */
-
-#endif /* _NET_SIIT_PACKET_H_ */
+#endif /* _NET_IPXLAT_PACKET_H_ */

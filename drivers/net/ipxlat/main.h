@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-2.0
+/* SPDX-License-Identifier: GPL-2.0 */
 /*  SIIT - Stateless IP/ICMP Translation virtual device driver
  *
  *  Copyright (C) 2024- Alberto Leiva Popper <ydahhrk@gmail.com>

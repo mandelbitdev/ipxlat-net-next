@@ -5,10 +5,13 @@
  *  Copyright (C) 2025- Antonio Quartulli <antonio@mandelbit.com>
  */
 
-#ifndef _NET_IPXLAT_NETLINK_H_
-#define _NET_IPXLAT_NETLINK_H_
+#ifndef _NET_IPXLAT_ICMP_46_H_
+#define _NET_IPXLAT_ICMP_46_H_
 
-int ipxl_nl_register(void);
-void ipxl_nl_unregister(void);
+#include "ipxlpriv.h"
 
-#endif /* _NET_IPXLAT_NETLINK_H_ */
+struct sk_buff;
+
+int ipxl_46_icmp(const struct ipxl_pkt_ctx *ctx, struct sk_buff *skb);
+
+#endif /* _NET_IPXLAT_ICMP_46_H_ */
