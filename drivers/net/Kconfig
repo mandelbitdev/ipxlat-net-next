@@ -117,6 +117,15 @@ config OVPN
 	  This module enhances the performance of the OpenVPN userspace software
 	  by offloading the data channel processing to kernelspace.
 
+config IPXLAT
+	tristate "IPv6-IPv4 packet translation virtual device"
+	depends on NET && INET && IPV6
+	help
+	  Virtual device driver implementing Stateless IP/ICMP Translation
+	  (RFC 7915). Can be used to build IPv6-mostly or 464XLAT network
+	  architectures when used in conjunction with suitably configured
+	  Netfilter NAT44 and NAT66.
+
 config EQUALIZER
 	tristate "EQL (serial line load balancing) support"
 	help
