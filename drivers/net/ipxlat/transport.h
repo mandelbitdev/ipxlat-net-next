@@ -93,5 +93,24 @@ int ipxl_icmp_relayout(struct sk_buff *skb, unsigned int outer_len,
 int ipxl_finalize_offload(struct sk_buff *skb, u8 l4_proto, bool is_fragment,
 			  u32 gso_from, u32 gso_to);
 
+/* outer transport translation helpers (packet L3 already translated) */
+int ipxl_46_outer_tcp(struct sk_buff *skb, const struct iphdr *in4);
+int ipxl_46_outer_udp(struct sk_buff *skb, const struct iphdr *in4);
+
+/* quoted-inner transport translation helpers for ICMP error payloads */
+int ipxl_46_inner_tcp(struct sk_buff *skb, const struct iphdr *in4,
+		      const struct ipv6hdr *iph6, struct tcphdr *tcp_new);
+int ipxl_46_inner_udp(struct sk_buff *skb, const struct iphdr *in4,
+		      const struct ipv6hdr *iph6, struct udphdr *udp_new);
+
+/* outer transport translation helpers (packet L3 already translated) */
+int ipxl_64_outer_tcp(struct sk_buff *skb, const struct ipv6hdr *in6);
+int ipxl_64_outer_udp(struct sk_buff *skb, const struct ipv6hdr *in6);
+
+/* quoted-inner transport translation helpers for ICMP error payloads */
+int ipxl_64_inner_tcp(struct sk_buff *skb, const struct ipv6hdr *in6,
+		      const struct iphdr *out4, struct tcphdr *tcp_new);
+int ipxl_64_inner_udp(struct sk_buff *skb, const struct ipv6hdr *in6,
+		      const struct iphdr *out4, struct udphdr *udp_new);
 
 #endif /* _NET_IPXLAT_TRANSPORT_H_ */
