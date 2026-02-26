@@ -12,6 +12,7 @@
 #include <net/ip6_route.h>
 
 #include "address.h"
+#include "dispatch.h"
 #include "packet.h"
 #include "transport.h"
 #include "translate_46.h"
@@ -80,6 +81,72 @@ unsigned int ipxl_46_lookup_pmtu6(struct ipxl_priv *ipxl,
 out:
 	dst_release(dst);
 	return mtu6;
+}
+
+/**
+ * ipxl_46_plan_prefrag - plan pre-translation IPv4 fragmentation for 4->6
+ * @ipxl: translator private context
+ * @skb: packet being translated
+ *
+ * Decides whether packet exceeds PMTU/LIM thresholds and, when needed, stores
+ * per-skb fragmentation cap in cb->frag_max_size for later ip_do_fragment.
+ *
+ * Return: 0 on success, negative errno on policy/validation failure.
+ */
+int ipxl_46_plan_prefrag(struct ipxl_priv *ipxl, struct sk_buff *skb)
+{
+	unsigned int pkt_len6, pmtu6, threshold6, frag_max_size, pkt_len4,
+		old_l3_len, new_l3_len;
+	const struct iphdr *in4 = ip_hdr(skb);
+	struct ipxl_cb *cb = ipxl_skb_cb(skb);
+	int l3_delta, frag_l3_delta;
+
+	if (unlikely(cb->frag_max_size)) {
+		DEBUG_NET_WARN_ON_ONCE(1);
+		cb->frag_max_size = 0;
+	}
+
+	pkt_len4 = iph_totlen(skb, in4);
+	old_l3_len = cb->l3_hdr_len;
+	new_l3_len = sizeof(struct ipv6hdr) +
+		     (ip_is_fragment(in4) ? sizeof(struct frag_hdr) : 0);
+	l3_delta = (int)new_l3_len - (int)old_l3_len;
+	pkt_len6 = pkt_len4 + l3_delta;
+
+	pmtu6 = ipxl_46_lookup_pmtu6(ipxl, skb, in4);
+	threshold6 = min(pmtu6, READ_ONCE(ipxl->cfg.lowest_ipv6_mtu));
+
+	if (likely(pkt_len6 <= threshold6))
+		return 0;
+
+	/* df packets are never locally pre-fragmented */
+	if (likely(be16_to_cpu(in4->frag_off) & IP_DF)) {
+		/* If we're not allowed to fragment but translation would
+		 * exceed the next-hop MTU on the IPv6 side, emit ICMPv4
+		 * FRAG_NEEDED.
+		 * Incoming ICMPv4 errors are exempt: they proceed to the
+		 * ICMP error squeeze/trim path.
+		 */
+		if (unlikely(pkt_len6 > pmtu6 && !cb->is_icmp_err)) {
+			ipxl_mark_icmp_drop(skb, ICMP_DEST_UNREACH,
+					    ICMP_FRAG_NEEDED,
+					    pmtu6 > 20 ? pmtu6 - 20 : 0);
+			return -EINVAL;
+		}
+		return 0;
+	}
+
+	/* df not set: we can fragment */
+
+	frag_l3_delta =
+		(int)(sizeof(struct ipv6hdr) + sizeof(struct frag_hdr)) -
+		(int)old_l3_len;
+	frag_max_size = threshold6 - frag_l3_delta;
+	/* store per-skb prefrag cap: ipxl_46_fragment_pkt will copy it into
+	 * IPCB(skb)->frag_max_size before calling ip_do_fragment
+	 */
+	cb->frag_max_size = min_t(unsigned int, frag_max_size, IP_MAX_MTU);
+	return 0;
 }
 
 /**
