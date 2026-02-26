@@ -13,6 +13,7 @@
 
 #include "address.h"
 #include "dispatch.h"
+#include "icmp.h"
 #include "packet.h"
 #include "transport.h"
 #include "translate_46.h"

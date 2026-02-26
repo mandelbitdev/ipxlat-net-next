@@ -19,6 +19,8 @@
 /**
  * ipxl_l4_min_len - minimum transport header size for protocol
  * @protocol: transport protocol identifier
+ *
+ * Return: minimum header length for @protocol, or 0 if unsupported.
  */
 static inline unsigned int ipxl_l4_min_len(u8 protocol)
 {
@@ -51,6 +53,8 @@ int ipxl_set_partial_csum(struct sk_buff *skb, u16 csum_offset);
  * @l4_off: transport header offset
  * @l4_len: transport span (header + payload)
  * @proto: transport protocol
+ *
+ * Return: finalized transport checksum for IPv6 packet context.
  */
 __sum16 ipxl_l4_csum_ipv6(const struct in6_addr *saddr,
 			  const struct in6_addr *daddr,
@@ -112,10 +116,5 @@ int ipxl_64_inner_tcp(struct sk_buff *skb, const struct ipv6hdr *in6,
 		      const struct iphdr *out4, struct tcphdr *tcp_new);
 int ipxl_64_inner_udp(struct sk_buff *skb, const struct ipv6hdr *in6,
 		      const struct iphdr *out4, struct udphdr *udp_new);
-
-/* temporary ICMP stubs until ICMP translation support is introduced */
-int ipxl_46_icmp(struct ipxl_priv *ipxl, struct sk_buff *skb);
-int ipxl_64_icmp(struct ipxl_priv *ipxl, struct sk_buff *skb,
-		 const struct ipv6hdr *outer6);
 
 #endif /* _NET_IPXLAT_TRANSPORT_H_ */

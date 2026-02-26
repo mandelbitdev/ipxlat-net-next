@@ -14,6 +14,7 @@
 
 #include "translate_64.h"
 #include "address.h"
+#include "icmp.h"
 #include "packet.h"
 #include "transport.h"
 
