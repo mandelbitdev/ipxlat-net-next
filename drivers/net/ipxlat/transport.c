@@ -392,3 +392,14 @@ int ipxl_64_inner_udp(struct sk_buff *skb, const struct ipv6hdr *in6,
 		udp_new->check = CSUM_MANGLED_0;
 	return 0;
 }
+
+int ipxl_46_icmp(struct ipxl_priv *ipxl, struct sk_buff *skb)
+{
+	return -EPROTONOSUPPORT;
+}
+
+int ipxl_64_icmp(struct ipxl_priv *ipxl, struct sk_buff *skb,
+		 const struct ipv6hdr *outer6)
+{
+	return -EPROTONOSUPPORT;
+}

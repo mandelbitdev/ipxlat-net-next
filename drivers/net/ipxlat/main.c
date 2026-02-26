@@ -13,6 +13,7 @@
 
 #include <net/ip.h>
 
+#include "dispatch.h"
 #include "ipxlpriv.h"
 #include "main.h"
 
@@ -61,8 +62,9 @@ static void ipxl_dev_uninit(struct net_device *dev)
 
 static int ipxl_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
-	dev_dstats_tx_dropped(dev);
-	kfree_skb(skb);
+	struct ipxl_priv *ipxl = netdev_priv(dev);
+
+	ipxl_process_skb(ipxl, skb, true);
 	return NETDEV_TX_OK;
 }
 

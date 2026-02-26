@@ -11,6 +11,7 @@
 
 #include <linux/icmp.h>
 
+#include "dispatch.h"
 #include "packet.h"
 
 /* Shift cached skb cb offsets by the L3 header delta after in-place rewrite.
