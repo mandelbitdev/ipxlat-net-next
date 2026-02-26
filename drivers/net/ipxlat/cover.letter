@@ -1,0 +1,59 @@
+Hi all,
+
+this series introduces ipxlat, a virtual netdevice implementing stateless
+IPv4/IPv6 translation. The intent is to provide a small in-kernel
+translator for environments where IPv4-only and IPv6-only segments must
+interoperate. The implementation follows:
+
+- RFC 7915 for SIIT behavior
+- RFC 6052 for address mapping
+- RFC 6791 for ICMP source-address mapping considerations
+- RFC 4884 for ICMP extension handling in error payloads
+
+The series contains 14 patches covering driver core, translation paths,
+netlink API and selftests.
+
+ipxlat sits at a boundary between two kernel models. It is exposed as a
+netdevice, so it has device semantics such as MTU and netdev statistics. At
+the same time, most of its work is protocol translation logic that is
+closer to stack processing than to a conventional L2/L3 forwarding device.
+The implementation therefore uses netdevice hooks for integration and
+lifecycle, while translation behavior follows RFC rules and reuses existing
+IP stack helpers for routing, fragmentation and checksum handling.
+
+Feedback on the netdevice integration model is welcome, but this series
+intentionally keeps scope limited to a self-contained driver to make review
+and validation tractable.
+
+ipxlat devices are created and destroyed via rtnl link operations.
+Per-device translation parameters are configured through a generic netlink
+family named ipxl. The current configuration includes pool6, pool6791v4,
+pool6791v6, lowest_ipv6_mtu and compute_udp_csum_zero. In practice, pool6
+defines the RFC6052 mapping prefix, pool6791v4 and pool6791v6 provide
+addresses used by RFC6791-related ICMP handling, lowest_ipv6_mtu is a
+configured floor for the 4 to 6 pre-fragmentation threshold (independent of
+the device MTU), and compute_udp_csum_zero controls whether IPv4 UDP
+checksum-zero traffic is accepted for 4 to 6 translation.
+
+The implementation enforces a strict processing contract: packet validation
+is done once, then translation runs on that validated layout. When
+translation cannot continue, the packet is either dropped or redirected to
+translator ICMP emission depending on RFC-required behavior for that
+failure class.
+
+Control-plane updates are serialized, while the data path reads
+configuration locklessly to keep per-packet overhead low. During live
+reconfiguration, readers may transiently observe mixed old and new values;
+this may cause a small number of packet drops while configuration is being
+changed. This tradeoff is intentional to keep the fast path simple and
+lightweight.
+
+Selftests are added under tools/testing/selftests/net/ipxlat and cover
+ICMP, TCP and UDP translation in both directions, large-packet and
+fragmentation-sensitive paths, ICMP error translation, and PMTUD-related
+emission paths.
+
+No generic networking core behavior is changed. The series is contained to
+the new driver, its uapi header, netlink specification and selftests.
+
+Thanks for your review.
