@@ -16,6 +16,7 @@
 #include "dispatch.h"
 #include "ipxlpriv.h"
 #include "main.h"
+#include "netlink.h"
 
 MODULE_AUTHOR("Alberto Leiva Popper <ydahhrk@gmail.com>");
 MODULE_AUTHOR("Antonio Quartulli <antonio@mandelbit.com>");
@@ -132,11 +133,19 @@ static int __init ipxl_init(void)
 		return err;
 	}
 
+	err = ipxl_nl_register();
+	if (err) {
+		pr_err("ipxlat: failed to register netlink family: %d\n", err);
+		rtnl_link_unregister(&ipxl_link_ops);
+		return err;
+	}
+
 	return 0;
 }
 
 static void __exit ipxl_exit(void)
 {
+	ipxl_nl_unregister();
 	rtnl_link_unregister(&ipxl_link_ops);
 }
 

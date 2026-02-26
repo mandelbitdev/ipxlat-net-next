@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: ((GPL-2.0 WITH Linux-syscall-note) OR BSD-3-Clause)
+#
+# Copyright (C) 2024- Alberto Leiva Popper <ydahhrk@gmail.com>
+# Copyright (C) 2026- Mandelbit, SRL
+#
+# Author: Alberto Leiva Popper <ydahhrk@gmail.com>
+#         Antonio Quartulli <antonio@mandelbit.com>
+#         Ralf Lici <ralf@mandelbit.com>
+#
+---
+name: ipxl
+protocol: genetlink
+doc: Netlink protocol to control IPXLAT (SIIT) network devices.
+
+definitions:
+  -
+    type: const
+    name: pool6-max-prefix-len
+    value: 96
+    doc: Maximum prefix length accepted for pool6.
+
+attribute-sets:
+  -
+    name: pool
+    attributes:
+      -
+        name: prefix
+        type: binary
+        checks:
+          exact-len: 16
+      -
+        name: prefix-len
+        type: u8
+        checks:
+          max: pool6-max-prefix-len
+  -
+    name: cfg
+    attributes:
+      -
+        name: pool6
+        type: nest
+        doc: IPv6 pool.
+        nested-attributes: pool
+      -
+        name: pool6791v6
+        type: binary
+        checks:
+          exact-len: 16
+      -
+        name: pool6791v4
+        type: u32
+        byte-order: big-endian
+        display-hint: ipv4
+      -
+        name: lowest-ipv6-mtu
+        type: u32
+        checks:
+          min: 1280
+      -
+        name: compute-udp-csum-zero
+        type: u8
+        checks:
+          max: 1
+  -
+    name: dev
+    attributes:
+      -
+        name: ifindex
+        type: u32
+        doc: Index of the ipxlat interface to operate on.
+      -
+        name: netnsid
+        type: s32
+        doc: ID of the netns the device lives in.
+      -
+        name: config
+        type: nest
+        doc: Ipxlat device configuration.
+        nested-attributes: cfg
+
+operations:
+  list:
+    -
+      name: dev-get
+      attribute-set: dev
+      doc: Get / dump configuration of ipxlat devices.
+      do:
+        pre: ipxl-nl-pre-doit
+        post: ipxl-nl-post-doit
+        request:
+          attributes:
+            - ifindex
+        reply:  &dev-all
+          attributes:
+            - ifindex
+            - netnsid
+            - config
+      dump:
+        reply: *dev-all
+
+    -
+      name: dev-set
+      doc: Set configuration of an ipxlat device.
+      attribute-set: dev
+      flags: [admin-perm]
+      do:
+        request:
+          attributes:
+            - ifindex
+            - config
+        reply:
+          attributes: []
+        pre:  ipxl-nl-pre-doit
+        post: ipxl-nl-post-doit
