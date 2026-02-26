@@ -140,6 +140,8 @@ static int ipxl_v4_srr_check(struct sk_buff *skb, const struct iphdr *hdr)
 			if (unlikely(ptr > len - 3))
 				return -EINVAL;
 
+			ipxl_mark_icmp_drop(skb, ICMP_DEST_UNREACH,
+					    ICMP_SR_FAILED, 0);
 			return -EINVAL;
 		}
 
@@ -271,6 +273,7 @@ static int ipxl_v4_pull_hdrs(struct sk_buff *skb)
 	if (unlikely(ipxl_v4_srr_check(skb, l3_hdr)))
 		return -EINVAL;
 	if (unlikely(l3_hdr->ttl <= 1)) {
+		ipxl_mark_icmp_drop(skb, ICMP_TIME_EXCEEDED, ICMP_EXC_TTL, 0);
 		return -EINVAL;
 	}
 
@@ -391,6 +394,8 @@ int ipxl_v4_validate_skb(struct ipxl_priv *ipxl, struct sk_buff *skb)
 	 */
 	if (unlikely(ip_is_fragment(l3_hdr) ||
 		     !READ_ONCE(ipxl->cfg.compute_udp_csum_zero))) {
+		ipxl_mark_icmp_drop(skb, ICMP_DEST_UNREACH, ICMP_PKT_FILTERED,
+				    0);
 		return -EINVAL;
 	}
 
@@ -519,7 +524,7 @@ static int ipxl_v6_walk_hdrs(struct sk_buff *skb, unsigned int l3_offset,
  */
 static int ipxl_v6_check_rh(struct sk_buff *skb)
 {
-	unsigned int rh_off;
+	unsigned int rh_off, pointer;
 	int flags, nexthdr;
 
 	rh_off = 0;
@@ -530,6 +535,8 @@ static int ipxl_v6_check_rh(struct sk_buff *skb)
 	if (likely(nexthdr != NEXTHDR_ROUTING))
 		return 0;
 
+	pointer = rh_off + offsetof(struct ipv6_rt_hdr, segments_left);
+	ipxl_mark_icmp_drop(skb, ICMPV6_PARAMPROB, ICMPV6_HDR_FIELD, pointer);
 	return -EINVAL;
 }
 
@@ -550,6 +557,8 @@ static int ipxl_v6_pull_outer_l3(struct sk_buff *skb)
 		return -EINVAL;
 
 	if (unlikely(l3_hdr->hop_limit <= 1)) {
+		ipxl_mark_icmp_drop(skb, ICMPV6_TIME_EXCEED,
+				    ICMPV6_EXC_HOPLIMIT, 0);
 		return -EINVAL;
 	}
 
@@ -618,6 +627,8 @@ static int ipxl_v6_pull_hdrs(struct sk_buff *skb)
 	 * unsupported by our RFC 7915 path
 	 */
 	if (unlikely(err == -EPROTONOSUPPORT)) {
+		ipxl_mark_icmp_drop(skb, ICMPV6_DEST_UNREACH,
+				    ICMPV6_ADM_PROHIBITED, 0);
 		return -EINVAL;
 	}
 	if (unlikely(err))
