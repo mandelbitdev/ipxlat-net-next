@@ -55,4 +55,14 @@ ipxl_run_iperf "$NS4" "$NS6" "$IPXL_V6_NS4" 5202 \
 check_err $? "udp 6->4 failed"
 log_test "udp 6->4"
 
+# Send one IPv4 UDP packet with checksum=0 and verify 4->6 translation.
+
+RET=0
+ipxl_capture_pkts "$NS6" \
+	"ip6 and udp and dst host $IPXL_V6_REMOTE and dst port 5555" 1 3 \
+	ip netns exec "$NS4" "$SCRIPT_DIR/ipxlat_udp4_zero_csum_send" \
+	"$IPXL_NS4_ADDR" "$IPXL_V4_REMOTE" 5555
+check_err $? "udp checksum-zero 4->6 failed"
+log_test "udp checksum-zero 4->6"
+
 exit "$EXIT_STATUS"

@@ -18,4 +18,8 @@ TEST_FILES := \
 	ipxlat_lib.sh \
 # end of TEST_FILES
 
+TEST_GEN_FILES := \
+	ipxlat_udp4_zero_csum_send \
+# end of TEST_GEN_FILES
+
 include ../../lib.mk
