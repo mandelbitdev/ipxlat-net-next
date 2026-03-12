@@ -33,6 +33,11 @@ check_err $? "icmp-error 6->4 not observed"
 log_test "icmp-error xlate 6->4"
 
 # Send oversized DF IPv4 packet and verify local ICMPv4 Fragmentation Needed emission
+sysctl -w net.ipv4.conf.ipxl0.accept_local=1
+sysctl -w net.ipv4.conf.all.rp_filter=0
+sysctl -w net.ipv4.conf.default.rp_filter=0
+sysctl -w net.ipv4.conf.ipxl0.rp_filter=0
+sleep 2
 RET=0
 ipxl_capture_pkts "$NS4" "icmp and icmp[0] == 3 and icmp[1] == 4" 1 3 \
 	ip netns exec "$NS4" bash -c \

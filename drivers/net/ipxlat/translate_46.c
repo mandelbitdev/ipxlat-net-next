@@ -12,7 +12,6 @@
 #include <net/ip6_route.h>
 
 #include "address.h"
-#include "dispatch.h"
 #include "icmp.h"
 #include "packet.h"
 #include "transport.h"
@@ -122,18 +121,9 @@ int ipxl_46_plan_prefrag(struct ipxl_priv *ipxl, struct sk_buff *skb)
 
 	/* df packets are never locally pre-fragmented */
 	if (likely(be16_to_cpu(in4->frag_off) & IP_DF)) {
-		/* If we're not allowed to fragment but translation would
-		 * exceed the next-hop MTU on the IPv6 side, emit ICMPv4
-		 * FRAG_NEEDED.
-		 * Incoming ICMPv4 errors are exempt: they proceed to the
-		 * ICMP error squeeze/trim path.
+		/* Let the IPv6 forwarding path raise PTB when needed and rely
+		 * on the reverse 6->4 ICMP translation path for feedback.
 		 */
-		if (unlikely(pkt_len6 > pmtu6 && !cb->is_icmp_err)) {
-			ipxl_mark_icmp_drop(skb, ICMP_DEST_UNREACH,
-					    ICMP_FRAG_NEEDED,
-					    pmtu6 > 20 ? pmtu6 - 20 : 0);
-			return -EINVAL;
-		}
 		return 0;
 	}
 
