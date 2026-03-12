@@ -65,8 +65,7 @@ ipxl_build_dev_set_json()
 			config: {
 				pool6: {prefix: $prefix, "prefix-len": $prefix_len},
 				pool6791v4: $pool6791v4,
-				"lowest-ipv6-mtu": $lowest_ipv6_mtu,
-				"compute-udp-csum-zero": 0
+				"lowest-ipv6-mtu": $lowest_ipv6_mtu
 			}
 		}'
 }
@@ -127,7 +126,6 @@ ipxl_cleanup()
 #   - pool6 = 2001:db8:100::/40
 #   - pool6791v4 = 198.51.100.1
 #   - lowest-ipv6-mtu = 1280
-#   - compute-udp-csum-zero = false
 ipxl_configure_topology()
 {
 	local ifindex

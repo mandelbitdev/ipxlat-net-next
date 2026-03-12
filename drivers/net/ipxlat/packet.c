@@ -388,12 +388,10 @@ int ipxl_v4_validate_skb(struct ipxl_priv *ipxl, struct sk_buff *skb)
 
 	/* We are in the path where L4 header is present (unfragmented packets
 	 * or first fragments) and is UDP.
-	 * Zero UDP checksum is accepted only when policy allows translation.
 	 * Fragmented checksum-less IPv4 UDP is rejected because 4->6 cannot
 	 * reliably translate it.
 	 */
-	if (unlikely(ip_is_fragment(l3_hdr) ||
-		     !READ_ONCE(ipxl->cfg.compute_udp_csum_zero))) {
+	if (unlikely(ip_is_fragment(l3_hdr))) {
 		ipxl_mark_icmp_drop(skb, ICMP_DEST_UNREACH, ICMP_PKT_FILTERED,
 				    0);
 		return -EINVAL;

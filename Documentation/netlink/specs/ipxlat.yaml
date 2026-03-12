@@ -56,11 +56,6 @@ attribute-sets:
         type: u32
         checks:
           min: 1280
-      -
-        name: compute-udp-csum-zero
-        type: u8
-        checks:
-          max: 1
   -
     name: dev
     attributes:

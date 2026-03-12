@@ -104,7 +104,6 @@ static int ipxl_nl_send_dev(struct sk_buff *skb, struct ipxl_priv *ipxl,
 			    const u32 seq, int flags)
 {
 	struct nlattr *attr_cfg, *attr_pool;
-	bool compute_udp_csum_zero;
 	struct in6_addr pool6791v6;
 	struct ipv6_prefix pool6;
 	int id, ret = -EMSGSIZE;
@@ -118,7 +117,6 @@ static int ipxl_nl_send_dev(struct sk_buff *skb, struct ipxl_priv *ipxl,
 	pool6791v6 = ipxl->cfg.pool6791v6;
 	pool6791v4 = ipxl->cfg.pool6791v4.s_addr;
 	lowest_ipv6_mtu = ipxl->cfg.lowest_ipv6_mtu;
-	compute_udp_csum_zero = ipxl->cfg.compute_udp_csum_zero;
 	mutex_unlock(&ipxl->cfg_lock);
 
 	hdr = genlmsg_put(skb, portid, seq, &ipxl_nl_family, flags,
@@ -155,9 +153,7 @@ static int ipxl_nl_send_dev(struct sk_buff *skb, struct ipxl_priv *ipxl,
 
 	if (nla_put_in6_addr(skb, IPXL_A_CFG_POOL6791V6, &pool6791v6) ||
 	    nla_put_in_addr(skb, IPXL_A_CFG_POOL6791V4, pool6791v4) ||
-	    nla_put_u32(skb, IPXL_A_CFG_LOWEST_IPV6_MTU, lowest_ipv6_mtu) ||
-	    nla_put_u8(skb, IPXL_A_CFG_COMPUTE_UDP_CSUM_ZERO,
-		       compute_udp_csum_zero))
+	    nla_put_u32(skb, IPXL_A_CFG_LOWEST_IPV6_MTU, lowest_ipv6_mtu))
 		goto err;
 
 	nla_nest_end(skb, attr_cfg);
@@ -335,7 +331,6 @@ int ipxl_nl_dev_set_doit(struct sk_buff *skb, struct genl_info *info)
 {
 	struct ipxl_nl_info_ctx *ctx = (struct ipxl_nl_info_ctx *)info->ctx;
 	struct nlattr *attrs[IPXL_A_CFG_MAX + 1];
-	bool compute_udp_csum_zero;
 	struct in6_addr pool6791v6;
 	struct ipv6_prefix pool6;
 	u32 lowest_ipv6_mtu;
@@ -353,8 +348,7 @@ int ipxl_nl_dev_set_doit(struct sk_buff *skb, struct genl_info *info)
 
 	if (!attrs[IPXL_A_CFG_POOL6] && !attrs[IPXL_A_CFG_POOL6791V6] &&
 	    !attrs[IPXL_A_CFG_POOL6791V4] &&
-	    !attrs[IPXL_A_CFG_LOWEST_IPV6_MTU] &&
-	    !attrs[IPXL_A_CFG_COMPUTE_UDP_CSUM_ZERO]) {
+	    !attrs[IPXL_A_CFG_LOWEST_IPV6_MTU]) {
 		NL_SET_ERR_MSG_MOD(info->extack, "config update is empty");
 		return -EINVAL;
 	}
@@ -403,12 +397,6 @@ int ipxl_nl_dev_set_doit(struct sk_buff *skb, struct genl_info *info)
 		lowest_ipv6_mtu =
 			nla_get_u32(attrs[IPXL_A_CFG_LOWEST_IPV6_MTU]);
 		WRITE_ONCE(ctx->ipxl->cfg.lowest_ipv6_mtu, lowest_ipv6_mtu);
-	}
-	if (attrs[IPXL_A_CFG_COMPUTE_UDP_CSUM_ZERO]) {
-		compute_udp_csum_zero =
-			!!nla_get_u8(attrs[IPXL_A_CFG_COMPUTE_UDP_CSUM_ZERO]);
-		WRITE_ONCE(ctx->ipxl->cfg.compute_udp_csum_zero,
-			   compute_udp_csum_zero);
 	}
 
 out_unlock:

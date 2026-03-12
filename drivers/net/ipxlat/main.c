@@ -34,7 +34,6 @@ static const struct ipxl_cfg ipxl_cfg_defaults = {
 	.pool6791v4.s_addr = htonl(INADDR_DUMMY),
 
 	.lowest_ipv6_mtu = 1280,
-	.compute_udp_csum_zero = false,
 };
 
 static int ipxl_dev_init(struct net_device *dev)

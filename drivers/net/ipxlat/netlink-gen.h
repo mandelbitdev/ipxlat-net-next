@@ -13,7 +13,7 @@
 #include <uapi/linux/ipxl.h>
 
 /* Common nested types */
-extern const struct nla_policy ipxl_cfg_nl_policy[IPXL_A_CFG_COMPUTE_UDP_CSUM_ZERO + 1];
+extern const struct nla_policy ipxl_cfg_nl_policy[IPXL_A_CFG_LOWEST_IPV6_MTU + 1];
 extern const struct nla_policy ipxl_pool_nl_policy[IPXL_A_POOL_PREFIX_LEN + 1];
 
 int ipxl_nl_pre_doit(const struct genl_split_ops *ops, struct sk_buff *skb,
