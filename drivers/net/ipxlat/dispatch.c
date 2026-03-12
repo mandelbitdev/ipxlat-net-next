@@ -17,7 +17,6 @@
 #include <net/ipv6.h>
 
 #include "dispatch.h"
-#include "address.h"
 #include "packet.h"
 #include "translate_46.h"
 #include "translate_64.h"
@@ -99,31 +98,14 @@ static void ipxl_46_emit_icmp_err(struct ipxl_priv *ipxl, struct sk_buff *inner)
 		    htonl(cb->icmp_err.info), &param);
 }
 
-static void ipxl_64_emit_icmp_err(struct ipxl_priv *ipxl, struct sk_buff *inner)
+static void ipxl_64_emit_icmp_err(struct sk_buff *inner)
 {
 	struct ipxl_cb *cb = ipxl_skb_cb(inner);
-	struct ipv6_prefix pool6;
-
 	struct inet6_skb_parm param = {};
-	struct in6_addr pool6791v6;
-	struct in6_addr saddr;
-
-	/* prefer configured pool6791v6 as ICMPv6 source but if unset (::),
-	 * derive the source by translating pool6791v4 through pool6.
-	 */
-	pool6791v6 = ipxl->cfg.pool6791v6;
-	if (likely(!ipv6_addr_any(&pool6791v6))) {
-		saddr = pool6791v6;
-	} else {
-		pool6 = ipxl->cfg.pool6;
-		ipxl_46_convert_addr(&pool6,
-				     READ_ONCE(ipxl->cfg.pool6791v4.s_addr),
-				     &saddr);
-	}
 
 	/* emit the ICMPv6 error */
 	icmp6_send(inner, cb->icmp_err.type, cb->icmp_err.code,
-		   cb->icmp_err.info, &saddr, &param);
+		   cb->icmp_err.info, NULL, &param);
 }
 
 /* emit translator-generated ICMP errors for packets rejected by RFC rules */
@@ -131,7 +113,7 @@ void ipxl_emit_icmp_error(struct ipxl_priv *ipxl, struct sk_buff *inner)
 {
 	switch (ntohs(inner->protocol)) {
 	case ETH_P_IPV6:
-		ipxl_64_emit_icmp_err(ipxl, inner);
+		ipxl_64_emit_icmp_err(inner);
 		return;
 	case ETH_P_IP:
 		ipxl_46_emit_icmp_err(ipxl, inner);

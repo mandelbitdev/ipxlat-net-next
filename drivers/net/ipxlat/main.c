@@ -31,8 +31,6 @@ static const struct ipxl_cfg ipxl_cfg_defaults = {
 	.pool6.addr.s6_addr32[0] = htonl(0x0064ff9b),
 	.pool6.len = 96,
 
-	.pool6791v4.s_addr = htonl(INADDR_DUMMY),
-
 	.lowest_ipv6_mtu = 1280,
 };
 

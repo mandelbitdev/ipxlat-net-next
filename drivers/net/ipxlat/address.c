@@ -119,11 +119,11 @@ int ipxl_64_convert_addrs(const struct ipxl_cfg *cfg,
 		return -EINVAL;
 	}
 
-	/* RFC 6791 fallback for 6->4 ICMP error translation when source cannot
-	 * be extracted from pool6
+	/* keep 6->4 ICMP error translation functional even when the ICMPv6
+	 * source is not pool6-mapped (for example, stack-generated PTB)
 	 */
 	if (unlikely(!src_ok))
-		*src = READ_ONCE(cfg->pool6791v4.s_addr);
+		*src = htonl(INADDR_DUMMY);
 
 	return 0;
 }

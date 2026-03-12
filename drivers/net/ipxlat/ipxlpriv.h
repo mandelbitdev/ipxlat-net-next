@@ -29,14 +29,10 @@ struct ipv6_prefix {
 /**
  * struct ipxl_cfg - per-device translator configuration
  * @pool6: RFC 6052 prefix used for stateless v4<->v6 mapping
- * @pool6791v6: optional RFC 6791 IPv6 source for 4->6 ICMP errors
- * @pool6791v4: RFC 6791 IPv4 fallback source for 6->4 ICMP errors
  * @lowest_ipv6_mtu: LIM threshold used by 4->6 pre-fragment planning
  */
 struct ipxl_cfg {
 	struct ipv6_prefix pool6;
-	struct in6_addr pool6791v6;
-	struct in_addr pool6791v4;
 	u32 lowest_ipv6_mtu;
 };
 

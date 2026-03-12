@@ -42,16 +42,6 @@ attribute-sets:
         doc: IPv6 pool.
         nested-attributes: pool
       -
-        name: pool6791v6
-        type: binary
-        checks:
-          exact-len: 16
-      -
-        name: pool6791v4
-        type: u32
-        byte-order: big-endian
-        display-hint: ipv4
-      -
         name: lowest-ipv6-mtu
         type: u32
         checks:

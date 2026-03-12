@@ -34,9 +34,6 @@ void ipxl_46_convert_addr(const struct ipv6_prefix *pool6, __be32 addr4,
  * @src: output IPv4 source address
  * @dst: output IPv4 destination address
  *
- * For ICMPv6 error packets whose source is outside @cfg->pool6, this helper
- * returns @cfg->pool6791v4 as RFC 6791 fallback source.
- *
  * Return: 0 on success, negative errno on non-translatable addresses.
  */
 int ipxl_64_convert_addrs(const struct ipxl_cfg *cfg,

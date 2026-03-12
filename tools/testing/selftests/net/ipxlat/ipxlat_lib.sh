@@ -40,7 +40,6 @@ export IPXL_V4_REMOTE=192.0.2.33
 IPXL_V6_REMOTE=2001:db8:1c0:2:21::
 IPXL_V6_NS4=2001:db8:1c6:3364:2::
 IPXL_V6_NS6_SRC=2001:db8:1c0:2:2::
-IPXL_POOL6791V4=$IPXL_HOST4_ADDR
 
 NS4=""
 NS6=""
@@ -58,13 +57,11 @@ ipxl_build_dev_set_json()
 		--argjson ifindex "$ifindex" \
 		--arg prefix "$IPXL_POOL6_HEX" \
 		--argjson prefix_len "$IPXL_POOL6_LEN" \
-		--arg pool6791v4 "$IPXL_POOL6791V4" \
 		--argjson lowest_ipv6_mtu "$IPXL_LOWEST_IPV6_MTU" \
 		'{
 			ifindex: $ifindex,
 			config: {
 				pool6: {prefix: $prefix, "prefix-len": $prefix_len},
-				pool6791v4: $pool6791v4,
 				"lowest-ipv6-mtu": $lowest_ipv6_mtu
 			}
 		}'
@@ -124,7 +121,6 @@ ipxl_cleanup()
 #
 # ipxlat config under test:
 #   - pool6 = 2001:db8:100::/40
-#   - pool6791v4 = 198.51.100.1
 #   - lowest-ipv6-mtu = 1280
 ipxl_configure_topology()
 {

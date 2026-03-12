@@ -14,8 +14,6 @@
 /* Common nested types */
 const struct nla_policy ipxl_cfg_nl_policy[IPXL_A_CFG_LOWEST_IPV6_MTU + 1] = {
 	[IPXL_A_CFG_POOL6] = NLA_POLICY_NESTED(ipxl_pool_nl_policy),
-	[IPXL_A_CFG_POOL6791V6] = NLA_POLICY_EXACT_LEN(16),
-	[IPXL_A_CFG_POOL6791V4] = { .type = NLA_BE32, },
 	[IPXL_A_CFG_LOWEST_IPV6_MTU] = NLA_POLICY_MIN(NLA_U32, 1280),
 };
 

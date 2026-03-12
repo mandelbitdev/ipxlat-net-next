@@ -7,7 +7,6 @@ interoperate. The implementation follows:
 
 - RFC 7915 for SIIT behavior
 - RFC 6052 for address mapping
-- RFC 6791 for ICMP source-address mapping considerations
 - RFC 4884 for ICMP extension handling in error payloads
 
 The series contains 14 patches covering driver core, translation paths,
@@ -27,11 +26,10 @@ and validation tractable.
 
 ipxlat devices are created and destroyed via rtnl link operations.
 Per-device translation parameters are configured through a generic netlink
-family named ipxl. The current configuration includes pool6, pool6791v4,
-pool6791v6 and lowest_ipv6_mtu. In practice, pool6 defines the RFC6052
-mapping prefix, pool6791v4 and pool6791v6 provide addresses used by
-RFC6791-related ICMP handling, and lowest_ipv6_mtu is a configured floor for
-the 4 to 6 pre-fragmentation threshold, independent of the device MTU.
+family named ipxl. The current configuration includes pool6 and
+lowest_ipv6_mtu. In practice, pool6 defines the RFC6052 mapping prefix and
+lowest_ipv6_mtu is a configured floor for the 4 to 6 pre-fragmentation
+threshold, independent of the device MTU.
 
 The implementation enforces a strict processing contract: packet validation
 is done once, then translation runs on that validated layout. When

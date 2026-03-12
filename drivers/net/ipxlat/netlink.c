@@ -104,18 +104,14 @@ static int ipxl_nl_send_dev(struct sk_buff *skb, struct ipxl_priv *ipxl,
 			    const u32 seq, int flags)
 {
 	struct nlattr *attr_cfg, *attr_pool;
-	struct in6_addr pool6791v6;
 	struct ipv6_prefix pool6;
 	int id, ret = -EMSGSIZE;
 	u32 lowest_ipv6_mtu;
-	__be32 pool6791v4;
 	void *hdr;
 
 	/* snapshot cfg under lock so userspace sees a coherent device config */
 	mutex_lock(&ipxl->cfg_lock);
 	pool6 = ipxl->cfg.pool6;
-	pool6791v6 = ipxl->cfg.pool6791v6;
-	pool6791v4 = ipxl->cfg.pool6791v4.s_addr;
 	lowest_ipv6_mtu = ipxl->cfg.lowest_ipv6_mtu;
 	mutex_unlock(&ipxl->cfg_lock);
 
@@ -151,9 +147,7 @@ static int ipxl_nl_send_dev(struct sk_buff *skb, struct ipxl_priv *ipxl,
 
 	nla_nest_end(skb, attr_pool);
 
-	if (nla_put_in6_addr(skb, IPXL_A_CFG_POOL6791V6, &pool6791v6) ||
-	    nla_put_in_addr(skb, IPXL_A_CFG_POOL6791V4, pool6791v4) ||
-	    nla_put_u32(skb, IPXL_A_CFG_LOWEST_IPV6_MTU, lowest_ipv6_mtu))
+	if (nla_put_u32(skb, IPXL_A_CFG_LOWEST_IPV6_MTU, lowest_ipv6_mtu))
 		goto err;
 
 	nla_nest_end(skb, attr_cfg);
@@ -286,55 +280,12 @@ static int ipxl_nl_parse_pool6(struct nlattr *attr, struct ipv6_prefix *pool6,
 	return 0;
 }
 
-static int ipxl_nl_validate_pool6791v4(__be32 addr,
-				       struct netlink_ext_ack *extack)
-{
-	if (ipv4_is_zeronet(addr) || ipv4_is_loopback(addr) ||
-	    ipv4_is_multicast(addr) || ipv4_is_lbcast(addr) ||
-	    ipv4_is_linklocal_169(addr)) {
-		NL_SET_ERR_MSG_FMT_MOD(extack,
-				       "invalid pool6791v4 address: %pI4",
-				       &addr);
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
-static int ipxl_nl_validate_pool6791v6(const struct in6_addr *addr,
-				       struct netlink_ext_ack *extack)
-{
-	int addr_type;
-
-	/* :: means "unset": keep pool6791v6 optional and let datapath derive
-	 * ICMPv6 source from pool6791v4 through pool6.
-	 */
-	if (ipv6_addr_any(addr))
-		return 0;
-
-	addr_type = ipv6_addr_type(addr);
-	if (!(addr_type & IPV6_ADDR_UNICAST) ||
-	    (addr_type & IPV6_ADDR_MULTICAST) ||
-	    (addr_type & IPV6_ADDR_LOOPBACK) ||
-	    (addr_type & IPV6_ADDR_LINKLOCAL) ||
-	    (addr_type & IPV6_ADDR_MAPPED)) {
-		NL_SET_ERR_MSG_FMT_MOD(extack,
-				       "invalid pool6791v6 address: %pI6c",
-				       addr);
-		return -EINVAL;
-	}
-
-	return 0;
-}
-
 int ipxl_nl_dev_set_doit(struct sk_buff *skb, struct genl_info *info)
 {
 	struct ipxl_nl_info_ctx *ctx = (struct ipxl_nl_info_ctx *)info->ctx;
 	struct nlattr *attrs[IPXL_A_CFG_MAX + 1];
-	struct in6_addr pool6791v6;
 	struct ipv6_prefix pool6;
 	u32 lowest_ipv6_mtu;
-	__be32 pool6791v4;
 	int ret = 0;
 
 	if (GENL_REQ_ATTR_CHECK(info, IPXL_A_DEV_CONFIG))
@@ -346,9 +297,7 @@ int ipxl_nl_dev_set_doit(struct sk_buff *skb, struct genl_info *info)
 	if (ret)
 		return ret;
 
-	if (!attrs[IPXL_A_CFG_POOL6] && !attrs[IPXL_A_CFG_POOL6791V6] &&
-	    !attrs[IPXL_A_CFG_POOL6791V4] &&
-	    !attrs[IPXL_A_CFG_LOWEST_IPV6_MTU]) {
+	if (!attrs[IPXL_A_CFG_POOL6] && !attrs[IPXL_A_CFG_LOWEST_IPV6_MTU]) {
 		NL_SET_ERR_MSG_MOD(info->extack, "config update is empty");
 		return -EINVAL;
 	}
@@ -367,32 +316,8 @@ int ipxl_nl_dev_set_doit(struct sk_buff *skb, struct genl_info *info)
 			goto out_unlock;
 	}
 
-	if (attrs[IPXL_A_CFG_POOL6791V6]) {
-		pool6791v6 = nla_get_in6_addr(attrs[IPXL_A_CFG_POOL6791V6]);
-		ret = ipxl_nl_validate_pool6791v6(&pool6791v6, info->extack);
-		if (ret) {
-			NL_SET_BAD_ATTR(info->extack,
-					attrs[IPXL_A_CFG_POOL6791V6]);
-			goto out_unlock;
-		}
-	}
-
-	if (attrs[IPXL_A_CFG_POOL6791V4]) {
-		pool6791v4 = nla_get_in_addr(attrs[IPXL_A_CFG_POOL6791V4]);
-		ret = ipxl_nl_validate_pool6791v4(pool6791v4, info->extack);
-		if (ret) {
-			NL_SET_BAD_ATTR(info->extack,
-					attrs[IPXL_A_CFG_POOL6791V4]);
-			goto out_unlock;
-		}
-	}
-
 	if (attrs[IPXL_A_CFG_POOL6])
 		ctx->ipxl->cfg.pool6 = pool6;
-	if (attrs[IPXL_A_CFG_POOL6791V6])
-		ctx->ipxl->cfg.pool6791v6 = pool6791v6;
-	if (attrs[IPXL_A_CFG_POOL6791V4])
-		WRITE_ONCE(ctx->ipxl->cfg.pool6791v4.s_addr, pool6791v4);
 	if (attrs[IPXL_A_CFG_LOWEST_IPV6_MTU]) {
 		lowest_ipv6_mtu =
 			nla_get_u32(attrs[IPXL_A_CFG_LOWEST_IPV6_MTU]);
