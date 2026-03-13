@@ -25,9 +25,9 @@ IPXL_VETH4_NS=veth4n
 IPXL_VETH6_HOST=veth6r
 IPXL_VETH6_NS=veth6n
 
-IPXL_POOL6_PREFIX=2001:db8:100::
-IPXL_POOL6_LEN=40
-IPXL_POOL6_HEX=20010db8010000000000000000000000
+IPXL_XLAT_PREFIX6=2001:db8:100::
+IPXL_XLAT_PREFIX6_LEN=40
+IPXL_XLAT_PREFIX6_HEX=20010db8010000000000000000000000
 IPXL_LOWEST_IPV6_MTU=1280
 
 IPXL_HOST4_ADDR=198.51.100.1
@@ -55,13 +55,13 @@ ipxl_build_dev_set_json()
 
 	jq -cn \
 		--argjson ifindex "$ifindex" \
-		--arg prefix "$IPXL_POOL6_HEX" \
-		--argjson prefix_len "$IPXL_POOL6_LEN" \
+		--arg prefix "$IPXL_XLAT_PREFIX6_HEX" \
+		--argjson prefix_len "$IPXL_XLAT_PREFIX6_LEN" \
 		--argjson lowest_ipv6_mtu "$IPXL_LOWEST_IPV6_MTU" \
 		'{
 			ifindex: $ifindex,
 			config: {
-				pool6: {prefix: $prefix, "prefix-len": $prefix_len},
+				"xlat-prefix6": {prefix: $prefix, "prefix-len": $prefix_len},
 				"lowest-ipv6-mtu": $lowest_ipv6_mtu
 			}
 		}'
@@ -101,7 +101,7 @@ ipxl_cleanup()
 #   - owns ipxlat dev `ipxl0`
 #   - has veth peers `veth4r` and `veth6r`
 #   - routes IPv4 test prefix (192.0.2.0/24) to ipxl0 (v4 network steering rule)
-#   - routes pool6 prefix (2001:db8:100::/40) out to NS6 side
+#   - routes xlat-prefix6 prefix (2001:db8:100::/40) out to NS6 side
 #   - routes mapped NS4 IPv6 identity (2001:db8:1c6:3364:2::/128) to ipxl0
 #     so NS6->NS4 traffic enters 6->4 translation
 #
@@ -120,7 +120,7 @@ ipxl_cleanup()
 #     This keeps the 6->4 test path deterministic.
 #
 # ipxlat config under test:
-#   - pool6 = 2001:db8:100::/40
+#   - xlat-prefix6 = 2001:db8:100::/40
 #   - lowest-ipv6-mtu = 1280
 ipxl_configure_topology()
 {
@@ -170,8 +170,8 @@ ipxl_configure_topology()
 
 	# 4->6 steering rule
 	ip route replace 192.0.2.0/24 dev "$IPXL_TRANSLATOR_DEV"
-	# Post-translation egress: IPv6 destinations in pool6 leave toward NS6.
-	ip -6 route replace "$IPXL_POOL6_PREFIX/$IPXL_POOL6_LEN" dev "$IPXL_VETH6_HOST"
+	# Post-translation egress: IPv6 destinations in xlat-prefix6 leave toward NS6.
+	ip -6 route replace "$IPXL_XLAT_PREFIX6/$IPXL_XLAT_PREFIX6_LEN" dev "$IPXL_VETH6_HOST"
 	# 6->4 steering rule
 	ip -6 route replace "$IPXL_V6_NS4/128" dev "$IPXL_TRANSLATOR_DEV"
 

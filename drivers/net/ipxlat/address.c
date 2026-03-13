@@ -40,12 +40,12 @@ static void ipxl_46_embed_addr(__be32 __src, struct in6_addr *dst,
 	dst->s6_addr[q4] = ((src) & 0xFF);
 }
 
-void ipxl_46_convert_addr(const struct ipv6_prefix *pool6, __be32 addr4,
+void ipxl_46_convert_addr(const struct ipv6_prefix *xlat_prefix6, __be32 addr4,
 			  struct in6_addr *addr6)
 {
-	*addr6 = pool6->addr;
+	*addr6 = xlat_prefix6->addr;
 
-	switch (pool6->len) {
+	switch (xlat_prefix6->len) {
 	case 96:
 		addr6->s6_addr32[3] = addr4;
 		return;
@@ -73,16 +73,16 @@ int ipxl_64_convert_addrs(const struct ipxl_cfg *cfg,
 			  const struct ipv6hdr *hdr6, bool icmp_err,
 			  __be32 *src, __be32 *dst)
 {
-	const struct ipv6_prefix *pool6 = &cfg->pool6;
+	const struct ipv6_prefix *xlat_prefix6 = &cfg->xlat_prefix6;
 	bool src_ok;
 
-	src_ok = ipxl_prefix6_contains(pool6, &hdr6->saddr);
+	src_ok = ipxl_prefix6_contains(xlat_prefix6, &hdr6->saddr);
 	if (unlikely(!src_ok && !icmp_err))
 		return -EINVAL;
-	if (unlikely(!ipxl_prefix6_contains(pool6, &hdr6->daddr)))
+	if (unlikely(!ipxl_prefix6_contains(xlat_prefix6, &hdr6->daddr)))
 		return -EINVAL;
 
-	switch (pool6->len) {
+	switch (xlat_prefix6->len) {
 	case 96:
 		if (likely(src_ok))
 			*src = hdr6->saddr.s6_addr32[3];
@@ -120,7 +120,7 @@ int ipxl_64_convert_addrs(const struct ipxl_cfg *cfg,
 	}
 
 	/* keep 6->4 ICMP error translation functional even when the ICMPv6
-	 * source is not pool6-mapped (for example, stack-generated PTB)
+	 * source is not xlat_prefix6-mapped (for example, stack-generated PTB)
 	 */
 	if (unlikely(!src_ok))
 		*src = htonl(INADDR_DUMMY);

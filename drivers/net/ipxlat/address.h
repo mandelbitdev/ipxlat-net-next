@@ -19,11 +19,11 @@
 
 /**
  * ipxl_46_convert_addr - translate one IPv4 address into RFC 6052 IPv6 form
- * @pool6: configured RFC 6052 prefix
+ * @xlat_prefix6: configured RFC 6052 prefix
  * @addr4: IPv4 address to convert
  * @addr6: output IPv6 address
  */
-void ipxl_46_convert_addr(const struct ipv6_prefix *pool6, __be32 addr4,
+void ipxl_46_convert_addr(const struct ipv6_prefix *xlat_prefix6, __be32 addr4,
 			  struct in6_addr *addr6);
 
 /**
@@ -50,8 +50,8 @@ static inline void ipxl_46_convert_addrs(const struct ipxl_cfg *cfg,
 					 const struct iphdr *iph4,
 					 struct ipv6hdr *iph6)
 {
-	ipxl_46_convert_addr(&cfg->pool6, iph4->saddr, &iph6->saddr);
-	ipxl_46_convert_addr(&cfg->pool6, iph4->daddr, &iph6->daddr);
+	ipxl_46_convert_addr(&cfg->xlat_prefix6, iph4->saddr, &iph6->saddr);
+	ipxl_46_convert_addr(&cfg->xlat_prefix6, iph4->daddr, &iph6->daddr);
 }
 
 #endif /* _NET_IPXLAT_ADDRESS_H_ */

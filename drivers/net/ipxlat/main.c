@@ -28,8 +28,8 @@ MODULE_LICENSE("GPL");
 
 static const struct ipxl_cfg ipxl_cfg_defaults = {
 	/* 64:ff9b::/96 */
-	.pool6.addr.s6_addr32[0] = htonl(0x0064ff9b),
-	.pool6.len = 96,
+	.xlat_prefix6.addr.s6_addr32[0] = htonl(0x0064ff9b),
+	.xlat_prefix6.len = 96,
 
 	.lowest_ipv6_mtu = 1280,
 };

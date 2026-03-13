@@ -104,14 +104,14 @@ static int ipxl_nl_send_dev(struct sk_buff *skb, struct ipxl_priv *ipxl,
 			    const u32 seq, int flags)
 {
 	struct nlattr *attr_cfg, *attr_pool;
-	struct ipv6_prefix pool6;
+	struct ipv6_prefix xlat_prefix6;
 	int id, ret = -EMSGSIZE;
 	u32 lowest_ipv6_mtu;
 	void *hdr;
 
 	/* snapshot cfg under lock so userspace sees a coherent device config */
 	mutex_lock(&ipxl->cfg_lock);
-	pool6 = ipxl->cfg.pool6;
+	xlat_prefix6 = ipxl->cfg.xlat_prefix6;
 	lowest_ipv6_mtu = ipxl->cfg.lowest_ipv6_mtu;
 	mutex_unlock(&ipxl->cfg_lock);
 
@@ -137,12 +137,12 @@ static int ipxl_nl_send_dev(struct sk_buff *skb, struct ipxl_priv *ipxl,
 	if (!attr_cfg)
 		goto err;
 
-	attr_pool = nla_nest_start(skb, IPXL_A_CFG_POOL6);
+	attr_pool = nla_nest_start(skb, IPXL_A_CFG_XLAT_PREFIX6);
 	if (!attr_pool)
 		goto err;
 
-	if (nla_put_in6_addr(skb, IPXL_A_POOL_PREFIX, &pool6.addr) ||
-	    nla_put_u8(skb, IPXL_A_POOL_PREFIX_LEN, pool6.len))
+	if (nla_put_in6_addr(skb, IPXL_A_POOL_PREFIX, &xlat_prefix6.addr) ||
+	    nla_put_u8(skb, IPXL_A_POOL_PREFIX_LEN, xlat_prefix6.len))
 		goto err;
 
 	nla_nest_end(skb, attr_pool);
@@ -216,7 +216,7 @@ int ipxl_nl_dev_get_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
 	return skb->len;
 }
 
-static int ipxl_nl_validate_pool6(const struct ipv6_prefix *prefix,
+static int ipxl_nl_validate_xlat_prefix6(const struct ipv6_prefix *prefix,
 				  struct netlink_ext_ack *extack)
 {
 	struct in6_addr addr_prefix;
@@ -240,14 +240,14 @@ static int ipxl_nl_validate_pool6(const struct ipv6_prefix *prefix,
 	return 0;
 }
 
-static int ipxl_nl_parse_pool6(struct nlattr *attr, struct ipv6_prefix *pool6,
+static int ipxl_nl_parse_xlat_prefix6(struct nlattr *attr, struct ipv6_prefix *xlat_prefix6,
 			       struct netlink_ext_ack *extack)
 {
 	struct nlattr *attrs_pool[IPXL_A_POOL_MAX + 1];
-	struct ipv6_prefix new_pool6;
+	struct ipv6_prefix new_xlat_prefix6;
 	int ret;
 
-	new_pool6 = *pool6;
+	new_xlat_prefix6 = *xlat_prefix6;
 
 	ret = nla_parse_nested(attrs_pool, IPXL_A_POOL_MAX, attr,
 			       ipxl_pool_nl_policy, extack);
@@ -256,17 +256,17 @@ static int ipxl_nl_parse_pool6(struct nlattr *attr, struct ipv6_prefix *pool6,
 
 	if (!attrs_pool[IPXL_A_POOL_PREFIX] &&
 	    !attrs_pool[IPXL_A_POOL_PREFIX_LEN]) {
-		NL_SET_ERR_MSG_MOD(extack, "pool6 update is empty");
+		NL_SET_ERR_MSG_MOD(extack, "xlat-prefix6 update is empty");
 		return -EINVAL;
 	}
 
 	if (attrs_pool[IPXL_A_POOL_PREFIX])
-		new_pool6.addr =
+		new_xlat_prefix6.addr =
 			nla_get_in6_addr(attrs_pool[IPXL_A_POOL_PREFIX]);
 	if (attrs_pool[IPXL_A_POOL_PREFIX_LEN])
-		new_pool6.len = nla_get_u8(attrs_pool[IPXL_A_POOL_PREFIX_LEN]);
+		new_xlat_prefix6.len = nla_get_u8(attrs_pool[IPXL_A_POOL_PREFIX_LEN]);
 
-	ret = ipxl_nl_validate_pool6(&new_pool6, extack);
+	ret = ipxl_nl_validate_xlat_prefix6(&new_xlat_prefix6, extack);
 	if (ret) {
 		if (attrs_pool[IPXL_A_POOL_PREFIX_LEN])
 			NL_SET_BAD_ATTR(extack,
@@ -276,7 +276,7 @@ static int ipxl_nl_parse_pool6(struct nlattr *attr, struct ipv6_prefix *pool6,
 		return ret;
 	}
 
-	*pool6 = new_pool6;
+	*xlat_prefix6 = new_xlat_prefix6;
 	return 0;
 }
 
@@ -284,7 +284,7 @@ int ipxl_nl_dev_set_doit(struct sk_buff *skb, struct genl_info *info)
 {
 	struct ipxl_nl_info_ctx *ctx = (struct ipxl_nl_info_ctx *)info->ctx;
 	struct nlattr *attrs[IPXL_A_CFG_MAX + 1];
-	struct ipv6_prefix pool6;
+	struct ipv6_prefix xlat_prefix6;
 	u32 lowest_ipv6_mtu;
 	int ret = 0;
 
@@ -297,7 +297,7 @@ int ipxl_nl_dev_set_doit(struct sk_buff *skb, struct genl_info *info)
 	if (ret)
 		return ret;
 
-	if (!attrs[IPXL_A_CFG_POOL6] && !attrs[IPXL_A_CFG_LOWEST_IPV6_MTU]) {
+	if (!attrs[IPXL_A_CFG_XLAT_PREFIX6] && !attrs[IPXL_A_CFG_LOWEST_IPV6_MTU]) {
 		NL_SET_ERR_MSG_MOD(info->extack, "config update is empty");
 		return -EINVAL;
 	}
@@ -308,16 +308,16 @@ int ipxl_nl_dev_set_doit(struct sk_buff *skb, struct genl_info *info)
 	 * separate phase. This preserves dev-set as an all-or-nothing update
 	 * and avoids committing partial state if a later attribute fails.
 	 */
-	if (attrs[IPXL_A_CFG_POOL6]) {
-		pool6 = ctx->ipxl->cfg.pool6;
-		ret = ipxl_nl_parse_pool6(attrs[IPXL_A_CFG_POOL6], &pool6,
+	if (attrs[IPXL_A_CFG_XLAT_PREFIX6]) {
+		xlat_prefix6 = ctx->ipxl->cfg.xlat_prefix6;
+		ret = ipxl_nl_parse_xlat_prefix6(attrs[IPXL_A_CFG_XLAT_PREFIX6], &xlat_prefix6,
 					  info->extack);
 		if (ret)
 			goto out_unlock;
 	}
 
-	if (attrs[IPXL_A_CFG_POOL6])
-		ctx->ipxl->cfg.pool6 = pool6;
+	if (attrs[IPXL_A_CFG_XLAT_PREFIX6])
+		ctx->ipxl->cfg.xlat_prefix6 = xlat_prefix6;
 	if (attrs[IPXL_A_CFG_LOWEST_IPV6_MTU]) {
 		lowest_ipv6_mtu =
 			nla_get_u32(attrs[IPXL_A_CFG_LOWEST_IPV6_MTU]);

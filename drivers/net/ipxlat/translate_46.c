@@ -60,8 +60,8 @@ unsigned int ipxl_46_lookup_pmtu6(struct ipxl_priv *ipxl,
 
 	dev_mtu = READ_ONCE(ipxl->dev->mtu);
 
-	ipxl_46_convert_addr(&ipxl->cfg.pool6, in4->saddr, &fl6.saddr);
-	ipxl_46_convert_addr(&ipxl->cfg.pool6, in4->daddr, &fl6.daddr);
+	ipxl_46_convert_addr(&ipxl->cfg.xlat_prefix6, in4->saddr, &fl6.saddr);
+	ipxl_46_convert_addr(&ipxl->cfg.xlat_prefix6, in4->daddr, &fl6.daddr);
 	fl6.flowi6_mark = skb->mark;
 
 	dst = ip6_route_output(dev_net(ipxl->dev), NULL, &fl6);
@@ -188,7 +188,7 @@ int ipxl_46_translate(struct ipxl_priv *ipxl, struct sk_buff *skb)
 	ipxl_46_build_l3(iph6, &outer4, skb->len - sizeof(*iph6), out_l4_proto,
 			 outer4.ttl - 1);
 
-	/* translate IPv4 endpoints into IPv6 addresses using pool6 prefix */
+	/* translate IPv4 endpoints into IPv6 addresses using xlat_prefix6 prefix */
 	ipxl_46_convert_addrs(&ipxl->cfg, &outer4, iph6);
 
 	/* add IPv6 fragment hdr when the IPv4 packet carried fragmentation */

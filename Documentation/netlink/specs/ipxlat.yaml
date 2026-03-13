@@ -15,9 +15,9 @@ doc: Netlink protocol to control IPXLAT (SIIT) network devices.
 definitions:
   -
     type: const
-    name: pool6-max-prefix-len
+    name: xlat-prefix6-max-prefix-len
     value: 96
-    doc: Maximum prefix length accepted for pool6.
+    doc: Maximum prefix length accepted for xlat-prefix6.
 
 attribute-sets:
   -
@@ -32,14 +32,14 @@ attribute-sets:
         name: prefix-len
         type: u8
         checks:
-          max: pool6-max-prefix-len
+          max: xlat-prefix6-max-prefix-len
   -
     name: cfg
     attributes:
       -
-        name: pool6
+        name: xlat-prefix6
         type: nest
-        doc: IPv6 pool.
+        doc: IPv6 translation prefix.
         nested-attributes: pool
       -
         name: lowest-ipv6-mtu
