@@ -219,21 +219,11 @@ int ipxl_nl_dev_get_dumpit(struct sk_buff *skb, struct netlink_callback *cb)
 static int ipxl_nl_validate_xlat_prefix6(const struct ipv6_prefix *prefix,
 				  struct netlink_ext_ack *extack)
 {
-	struct in6_addr addr_prefix;
-
 	if (prefix->len != 32 && prefix->len != 40 && prefix->len != 48 &&
 	    prefix->len != 56 && prefix->len != 64 && prefix->len != 96) {
 		NL_SET_ERR_MSG_FMT_MOD(extack,
 				       "unsupported RFC 6052 prefix length: %u",
 				       prefix->len);
-		return -EINVAL;
-	}
-
-	ipv6_addr_prefix(&addr_prefix, &prefix->addr, prefix->len);
-	if (!ipv6_addr_equal(&addr_prefix, &prefix->addr)) {
-		NL_SET_ERR_MSG_FMT_MOD(extack,
-				       "'%pI6c/%u' has non-zero host bits",
-				       &prefix->addr, prefix->len);
 		return -EINVAL;
 	}
 
