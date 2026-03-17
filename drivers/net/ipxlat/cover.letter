@@ -1,16 +1,23 @@
 Hi all,
 
-this series introduces ipxlat, a virtual netdevice implementing stateless
-IPv4/IPv6 translation. The intent is to provide a small in-kernel
-translator for environments where IPv4-only and IPv6-only segments must
-interoperate. The implementation follows:
+this RFC series introduces ipxlat, a virtual netdevice for stateless
+packet translation between IPv6 and IPv4. Stateless IP/ICMP translation
+(SIIT) is a building block that should ultimately allow suitably
+configured Linux systems to cover all connectivity scenarios outlined in
+RFC 6144 "Framework for IPv4/IPv6 Translation". While the packet
+translation function implemented in ipxlat itself is stateless, building
+stateful NAT64 translators is easy in combination with a sandwich of
+simple nft SNAT and MASQUERADE rules. SIIT-DC (RFC 7755 / 7756) ER/BR
+functions including EAMT (RFC 7757) are thought to be possible with
+suitable nft/iptables configuration, but this needs further testing.
 
-- RFC 7915 for SIIT behavior
-- RFC 6052 for address mapping
-- RFC 4884 for ICMP extension handling in error payloads
+The series contains patches covering driver core, translation paths,
+netlink API, selftests and documentation.
 
-The series contains 14 patches covering driver core, translation paths,
-netlink API and selftests.
+See Documentation/networking/ipxlat.rst for more details.
+
+
+== Architecture == 
 
 ipxlat sits at a boundary between two kernel models. It is exposed as a
 netdevice, so it has device semantics such as MTU and netdev statistics. At
@@ -20,36 +27,89 @@ The implementation therefore uses netdevice hooks for integration and
 lifecycle, while translation behavior follows RFC rules and reuses existing
 IP stack helpers for routing, fragmentation and checksum handling.
 
-Feedback on the netdevice integration model is welcome, but this series
+Feedback on the netdevice integration model is welcome, yet this series
 intentionally keeps scope limited to a self-contained driver to make review
 and validation tractable.
 
 ipxlat devices are created and destroyed via rtnl link operations.
 Per-device translation parameters are configured through a generic netlink
-family named ipxlat. The current configuration includes xlat-prefix6 and
-lowest_ipv6_mtu. In practice, xlat-prefix6 defines the RFC6052 mapping prefix and
-lowest_ipv6_mtu is a configured floor for the 4 to 6 pre-fragmentation
-threshold, independent of the device MTU.
+family named ipxlat.
 
-The implementation enforces a strict processing contract: packet validation
-is done once, then translation runs on that validated layout. When
-translation cannot continue, the packet is either dropped or redirected to
-translator ICMP emission depending on RFC-required behavior for that
-failure class.
+
+== RFCs ==
+
+The ipxlat packet translation code considers:
+
+- RFC 7915 - Stateless IP/ICMP translation (SIIT) behavior
+
+- RFC 6052 - Address mapping for xlat-prefix sizes between /32 and /96
+
+- RFC 6791 - Though we use standard ICMP source-address selection
+
+- RFC 4884 - Translation painstakingly handles ICMP extensions
+
+- RFC 5837 - Interface Information Objects from RFC 6791 are not
+  implemented in this series and are planned as follow-up work
+
+
+== Implementation ==
+
+We enforce a strict processing contract: packet validation is done once,
+then translation runs on that validated layout. When translation cannot
+continue, the packet is either dropped or we switch to the ICMP error
+emission path.
 
 Control-plane updates are serialized, while the data path reads
-configuration locklessly to keep per-packet overhead low. During live
-reconfiguration, readers may transiently observe mixed old and new values;
-this may cause a small number of packet drops while configuration is being
-changed. This tradeoff is intentional to keep the fast path simple and
-lightweight.
+configuration locklessly to keep per-packet overhead low.
+
+During live reconfiguration, readers may transiently observe mixed old
+and new values; this may cause a small number of packet drops while
+configuration is being changed.
+
+This tradeoff is intentional to keep the fast path simple and lightweight.
+
+
+== Selftests ==
 
 Selftests are added under tools/testing/selftests/net/ipxlat and cover
 ICMP, TCP and UDP translation in both directions, large-packet and
 fragmentation-sensitive paths, ICMP error translation, and PMTUD-related
 emission paths.
 
-No generic networking core behavior is changed. The series is contained to
-the new driver, its uapi header, netlink specification and selftests.
+No generic networking core behavior is changed.
+
+
+== Points of Discussion ==
+
+ - Tighter stack integration?
+
+
+== TODOs for v2 ==
+
+ - icmp: Simplify FRAG_NEEDED / PKT_TOOBIG MTU calculation.
+
+ - translation: Prevent skb loops without TTL/HLIM decrement?
+
+ - netdevice: MTU ?= 0xffff - $xlat_overhead?
+
+ - UDPv4 defrag and csum recalc for NAT64 (RFC 6146 Sec 3.4.) "For
+   incoming IPv4 packets carrying UDP packets with a zero checksum ...
+   MUST calculate the checksum"
+
+    -> See also: Stack integration? :-)
+
+== Acknowledgements ==
+
+The ipxlat translation code is based on the Jool project in order to
+benefit from years of accumulated experience and its golden-packet
+test-suite.
+
+Thanks to Jool's Principal Author, Alberto Leiva Popper, for developing and
+maintaining Jool since IPv6 translation was last in-vogue and writing the
+initial "joolif" netdevice prototype our work was able to start from.
+
+Thanks to NLnet for funding development of the ipxlat driver.
+
+---
 
 Thanks for your review.
