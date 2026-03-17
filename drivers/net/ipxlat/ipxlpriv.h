@@ -27,17 +27,17 @@ struct ipv6_prefix {
 };
 
 /**
- * struct ipxl_cfg - per-device translator configuration
+ * struct ipxlat_cfg - per-device translator configuration
  * @xlat_prefix6: RFC 6052 prefix used for stateless v4<->v6 mapping
  * @lowest_ipv6_mtu: LIM threshold used by 4->6 pre-fragment planning
  */
-struct ipxl_cfg {
+struct ipxlat_cfg {
 	struct ipv6_prefix xlat_prefix6;
 	u32 lowest_ipv6_mtu;
 };
 
 /**
- * struct ipxl_priv - private state stored in netdev priv area
+ * struct ipxlat_priv - private state stored in netdev priv area
  * @dev: owning netdevice
  * @cfg: active per-device configuration (read locklessly in datapath)
  * @cfg_lock: serializes control-plane updates to @cfg
@@ -49,9 +49,9 @@ struct ipxl_cfg {
  * During live reconfiguration, readers may transiently observe mixed old/new
  * values; this is an accepted tradeoff for a lightweight datapath.
  */
-struct ipxl_priv {
+struct ipxlat_priv {
 	struct net_device *dev;
-	struct ipxl_cfg cfg;
+	struct ipxlat_cfg cfg;
 	/* serializes control-plane updates to cfg */
 	struct mutex cfg_lock;
 	struct gro_cells gro_cells;

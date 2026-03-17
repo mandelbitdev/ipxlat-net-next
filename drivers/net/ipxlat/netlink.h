@@ -13,15 +13,15 @@
 #define _NET_IPXLAT_NETLINK_H_
 
 /**
- * ipxl_nl_register - register ipxlat generic-netlink family
+ * ipxlat_nl_register - register ipxlat generic-netlink family
  *
  * Return: 0 on success, negative errno on registration failure.
  */
-int ipxl_nl_register(void);
+int ipxlat_nl_register(void);
 
 /**
- * ipxl_nl_unregister - unregister ipxlat generic-netlink family
+ * ipxlat_nl_unregister - unregister ipxlat generic-netlink family
  */
-void ipxl_nl_unregister(void);
+void ipxlat_nl_unregister(void);
 
 #endif /* _NET_IPXLAT_NETLINK_H_ */

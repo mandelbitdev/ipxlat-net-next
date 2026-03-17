@@ -15,44 +15,44 @@
 #include "translate_46.h"
 #include "transport.h"
 
-#define IPXL_ICMP4_PP_CODE_PTR 0
-#define IPXL_ICMP4_PP_CODE_BADLEN 2
+#define IPXLAT_ICMP4_PP_CODE_PTR 0
+#define IPXLAT_ICMP4_PP_CODE_BADLEN 2
 
 /* RFC 7915 Section 4.2, Figure 3 */
-static const u8 ipxl_46_icmp_param_prob_map[] = { 0,	1,    4,    4,	0xff,
+static const u8 ipxlat_46_icmp_param_prob_map[] = { 0,	1,    4,    4,	0xff,
 						  0xff, 0xff, 0xff, 7,	6,
 						  0xff, 0xff, 8,    8,	8,
 						  8,	24,   24,   24, 24 };
 
 /* RFC 1191 plateau table used when ICMPv4 FRAG_NEEDED reports MTU=0 */
-static const u16 ipxl_46_mtu_plateaus[] = {
+static const u16 ipxlat_46_mtu_plateaus[] = {
 	65535, 32000, 17914, 8166, 4352, 2002, 1492,
 };
 
-static u8 ipxl_icmp4_get_param_ptr(const struct icmphdr *ic4)
+static u8 ipxlat_icmp4_get_param_ptr(const struct icmphdr *ic4)
 {
 	return ntohl(ic4->un.gateway) >> 24;
 }
 
-static int ipxl_46_map_icmp_param_prob(const struct icmphdr *in,
+static int ipxlat_46_map_icmp_param_prob(const struct icmphdr *in,
 				       struct icmp6hdr *out)
 {
 	u8 ptr;
 
-	if (unlikely(in->code != IPXL_ICMP4_PP_CODE_PTR &&
-		     in->code != IPXL_ICMP4_PP_CODE_BADLEN))
+	if (unlikely(in->code != IPXLAT_ICMP4_PP_CODE_PTR &&
+		     in->code != IPXLAT_ICMP4_PP_CODE_BADLEN))
 		return -EPROTONOSUPPORT;
 
-	ptr = ipxl_icmp4_get_param_ptr(in);
-	if (unlikely(ptr >= ARRAY_SIZE(ipxl_46_icmp_param_prob_map) ||
-		     ipxl_46_icmp_param_prob_map[ptr] == 0xff))
+	ptr = ipxlat_icmp4_get_param_ptr(in);
+	if (unlikely(ptr >= ARRAY_SIZE(ipxlat_46_icmp_param_prob_map) ||
+		     ipxlat_46_icmp_param_prob_map[ptr] == 0xff))
 		return -EPROTONOSUPPORT;
 
-	out->icmp6_pointer = cpu_to_be32(ipxl_46_icmp_param_prob_map[ptr]);
+	out->icmp6_pointer = cpu_to_be32(ipxlat_46_icmp_param_prob_map[ptr]);
 	return 0;
 }
 
-static int ipxl_46_map_icmp_info_type_code(const struct icmphdr *in,
+static int ipxlat_46_map_icmp_info_type_code(const struct icmphdr *in,
 					   struct icmp6hdr *out)
 {
 	switch (in->type) {
@@ -73,7 +73,7 @@ static int ipxl_46_map_icmp_info_type_code(const struct icmphdr *in,
 	return -EPROTONOSUPPORT;
 }
 
-static __be32 ipxl_46_compute_icmp_mtu6(unsigned int pkt_mtu,
+static __be32 ipxlat_46_compute_icmp_mtu6(unsigned int pkt_mtu,
 					unsigned int nexthop6mtu,
 					unsigned int nexthop4mtu,
 					u16 tot_len_field)
@@ -87,9 +87,9 @@ static __be32 ipxl_46_compute_icmp_mtu6(unsigned int pkt_mtu,
 	 * likely path MTU and include that path MTU in the ICMPv6 packet.
 	 */
 	if (unlikely(pkt_mtu == 0)) {
-		for (i = 0; i < ARRAY_SIZE(ipxl_46_mtu_plateaus); i++) {
-			if (ipxl_46_mtu_plateaus[i] < tot_len_field) {
-				pkt_mtu = ipxl_46_mtu_plateaus[i];
+		for (i = 0; i < ARRAY_SIZE(ipxlat_46_mtu_plateaus); i++) {
+			if (ipxlat_46_mtu_plateaus[i] < tot_len_field) {
+				pkt_mtu = ipxlat_46_mtu_plateaus[i];
 				break;
 			}
 		}
@@ -109,7 +109,7 @@ static __be32 ipxl_46_compute_icmp_mtu6(unsigned int pkt_mtu,
 	return cpu_to_be32(result);
 }
 
-static int ipxl_46_build_icmp_dest_unreach(struct ipxl_priv *ipxl,
+static int ipxlat_46_build_icmp_dest_unreach(struct ipxlat_priv *ipxlat,
 					   struct sk_buff *skb,
 					   const struct icmphdr *in,
 					   struct icmp6hdr *out,
@@ -138,11 +138,11 @@ static int ipxl_46_build_icmp_dest_unreach(struct ipxl_priv *ipxl,
 			cpu_to_be32(offsetof(struct ipv6hdr, nexthdr));
 		return 0;
 	case ICMP_FRAG_NEEDED:
-		in_mtu = READ_ONCE(ipxl->dev->mtu);
-		out_mtu = ipxl_46_lookup_pmtu6(ipxl, skb, inner4);
+		in_mtu = READ_ONCE(ipxlat->dev->mtu);
+		out_mtu = ipxlat_46_lookup_pmtu6(ipxlat, skb, inner4);
 
 		out->icmp6_mtu =
-			ipxl_46_compute_icmp_mtu6(be16_to_cpu(in->un.frag.mtu),
+			ipxlat_46_compute_icmp_mtu6(be16_to_cpu(in->un.frag.mtu),
 						  out_mtu, in_mtu,
 						  be16_to_cpu(inner4->tot_len));
 		return 0;
@@ -152,7 +152,7 @@ static int ipxl_46_build_icmp_dest_unreach(struct ipxl_priv *ipxl,
 }
 
 static int
-ipxl_46_map_icmp_type_code(struct ipxl_priv *ipxl, struct sk_buff *skb,
+ipxlat_46_map_icmp_type_code(struct ipxlat_priv *ipxlat, struct sk_buff *skb,
 			   const struct icmphdr *in, struct icmp6hdr *out,
 			   const struct iphdr *inner4, bool *ie_forbidden)
 {
@@ -163,7 +163,7 @@ ipxl_46_map_icmp_type_code(struct ipxl_priv *ipxl, struct sk_buff *skb,
 	switch (in->type) {
 	case ICMP_ECHO:
 	case ICMP_ECHOREPLY:
-		return ipxl_46_map_icmp_info_type_code(in, out);
+		return ipxlat_46_map_icmp_info_type_code(in, out);
 	case ICMP_DEST_UNREACH:
 		switch (in->code) {
 		case ICMP_NET_UNREACH:
@@ -201,7 +201,7 @@ ipxl_46_map_icmp_type_code(struct ipxl_priv *ipxl, struct sk_buff *skb,
 		default:
 			return -EPROTONOSUPPORT;
 		}
-		return ipxl_46_build_icmp_dest_unreach(ipxl, skb, in, out,
+		return ipxlat_46_build_icmp_dest_unreach(ipxlat, skb, in, out,
 						       inner4);
 	case ICMP_TIME_EXCEEDED:
 		out->icmp6_type = ICMPV6_TIME_EXCEED;
@@ -212,14 +212,14 @@ ipxl_46_map_icmp_type_code(struct ipxl_priv *ipxl, struct sk_buff *skb,
 		out->icmp6_type = ICMPV6_PARAMPROB;
 		*ie_forbidden = true;
 		switch (in->code) {
-		case IPXL_ICMP4_PP_CODE_PTR:
-		case IPXL_ICMP4_PP_CODE_BADLEN:
+		case IPXLAT_ICMP4_PP_CODE_PTR:
+		case IPXLAT_ICMP4_PP_CODE_BADLEN:
 			out->icmp6_code = ICMPV6_HDR_FIELD;
 			break;
 		default:
 			return -EPROTONOSUPPORT;
 		}
-		err = ipxl_46_map_icmp_param_prob(in, out);
+		err = ipxlat_46_map_icmp_param_prob(in, out);
 		if (unlikely(err))
 			return err;
 		return 0;
@@ -228,7 +228,7 @@ ipxl_46_map_icmp_type_code(struct ipxl_priv *ipxl, struct sk_buff *skb,
 	return -EPROTONOSUPPORT;
 }
 
-static void ipxl_46_icmp_info_update_csum(const struct icmphdr *icmp4,
+static void ipxlat_46_icmp_info_update_csum(const struct icmphdr *icmp4,
 					  struct icmp6hdr *icmp6,
 					  const struct ipv6hdr *ip6,
 					  const struct sk_buff *skb,
@@ -250,7 +250,7 @@ static void ipxl_46_icmp_info_update_csum(const struct icmphdr *icmp4,
 					     IPPROTO_ICMPV6, csum);
 }
 
-static int ipxl_46_icmp_info_outer(struct sk_buff *skb)
+static int ipxlat_46_icmp_info_outer(struct sk_buff *skb)
 {
 	const unsigned int l4_off = skb_transport_offset(skb);
 	const struct icmphdr icmp4 = *icmp_hdr(skb);
@@ -258,7 +258,7 @@ static int ipxl_46_icmp_info_outer(struct sk_buff *skb)
 	struct icmp6hdr *icmp6 = icmp6_hdr(skb);
 	int err;
 
-	err = ipxl_46_map_icmp_info_type_code(&icmp4, icmp6);
+	err = ipxlat_46_map_icmp_info_type_code(&icmp4, icmp6);
 	if (unlikely(err))
 		return -EINVAL;
 
@@ -266,16 +266,16 @@ static int ipxl_46_icmp_info_outer(struct sk_buff *skb)
 		icmp6->icmp6_cksum = ~csum_ipv6_magic(&ip6->saddr, &ip6->daddr,
 						      skb->len - l4_off,
 						      IPPROTO_ICMPV6, 0);
-		return ipxl_set_partial_csum(skb, offsetof(struct icmp6hdr,
+		return ipxlat_set_partial_csum(skb, offsetof(struct icmp6hdr,
 							   icmp6_cksum));
 	}
 
-	ipxl_46_icmp_info_update_csum(&icmp4, icmp6, ip6, skb, l4_off);
+	ipxlat_46_icmp_info_update_csum(&icmp4, icmp6, ip6, skb, l4_off);
 	skb->ip_summed = CHECKSUM_NONE;
 	return 0;
 }
 
-static int ipxl_46_icmp_info_inner(struct sk_buff *skb,
+static int ipxlat_46_icmp_info_inner(struct sk_buff *skb,
 				   unsigned int inner_l4_off,
 				   const struct ipv6hdr *inner6)
 {
@@ -287,15 +287,15 @@ static int ipxl_46_icmp_info_inner(struct sk_buff *skb,
 	memcpy(&icmp4, skb->data + inner_l4_off, sizeof(icmp4));
 	icmp6 = (struct icmp6hdr *)(skb->data + inner_l4_off);
 
-	err = ipxl_46_map_icmp_info_type_code(&icmp4, icmp6);
+	err = ipxlat_46_map_icmp_info_type_code(&icmp4, icmp6);
 	if (unlikely(err))
 		return -EINVAL;
 
-	ipxl_46_icmp_info_update_csum(&icmp4, icmp6, inner6, skb, inner_l4_off);
+	ipxlat_46_icmp_info_update_csum(&icmp4, icmp6, inner6, skb, inner_l4_off);
 	return 0;
 }
 
-static int ipxl_46_icmp_inner_l4(struct sk_buff *skb, unsigned int inner_l4_off,
+static int ipxlat_46_icmp_inner_l4(struct sk_buff *skb, unsigned int inner_l4_off,
 				 const struct iphdr *inner4,
 				 const struct ipv6hdr *inner6)
 {
@@ -305,24 +305,24 @@ static int ipxl_46_icmp_inner_l4(struct sk_buff *skb, unsigned int inner_l4_off,
 	switch (inner4->protocol) {
 	case IPPROTO_TCP:
 		tcp = (struct tcphdr *)(skb->data + inner_l4_off);
-		return ipxl_46_inner_tcp(skb, inner4, inner6, tcp);
+		return ipxlat_46_inner_tcp(skb, inner4, inner6, tcp);
 	case IPPROTO_UDP:
 		udp = (struct udphdr *)(skb->data + inner_l4_off);
-		return ipxl_46_inner_udp(skb, inner4, inner6, udp);
+		return ipxlat_46_inner_udp(skb, inner4, inner6, udp);
 	case IPPROTO_ICMP:
-		return ipxl_46_icmp_info_inner(skb, inner_l4_off, inner6);
+		return ipxlat_46_icmp_info_inner(skb, inner_l4_off, inner6);
 	default:
 		return 0;
 	}
 }
 
-static int ipxl_46_icmp_inner(struct ipxl_priv *ipxl, struct sk_buff *skb,
+static int ipxlat_46_icmp_inner(struct ipxlat_priv *ipxlat, struct sk_buff *skb,
 			      struct iphdr *inner4, int *inner_delta)
 {
 	unsigned int inner_l3_len, inner_l3_off, inner_l4_off, old_prefix,
 		new_prefix, inner_tot_len, inner_l3_payload, inner_l4_payload;
 	const unsigned int outer_l3_len = skb_transport_offset(skb);
-	const struct ipxl_cb *cb = ipxl_skb_cb(skb);
+	const struct ipxlat_cb *cb = ipxlat_skb_cb(skb);
 	struct ipv6hdr outer_ip6_copy, *inner_ip6;
 	struct frag_hdr *fh6;
 	bool has_inner_frag;
@@ -371,27 +371,27 @@ static int ipxl_46_icmp_inner(struct ipxl_priv *ipxl, struct sk_buff *skb,
 	inner_l3_payload = inner_tot_len - inner_l3_len +
 			   (has_inner_frag ? sizeof(struct frag_hdr) : 0);
 
-	ipxl_46_build_l3(inner_ip6, inner4, inner_l3_payload,
+	ipxlat_46_build_l3(inner_ip6, inner4, inner_l3_payload,
 			 has_inner_frag ?
 				 NEXTHDR_FRAGMENT :
-				 ipxl_46_map_proto_to_nexthdr(inner4->protocol),
+				 ipxlat_46_map_proto_to_nexthdr(inner4->protocol),
 			 inner4->ttl);
 
-	ipxl_46_convert_addrs(&ipxl->cfg, inner4, inner_ip6);
+	ipxlat_46_convert_addrs(&ipxlat->cfg, inner4, inner_ip6);
 
 	if (unlikely(has_inner_frag)) {
 		fh6 = (struct frag_hdr *)(inner_ip6 + 1);
-		ipxl_46_build_frag_hdr(fh6, inner4, inner4->protocol);
+		ipxlat_46_build_frag_hdr(fh6, inner4, inner4->protocol);
 	}
 
-	if (unlikely(!ipxl_is_first_frag4(inner4)))
+	if (unlikely(!ipxlat_is_first_frag4(inner4)))
 		return 0;
 
-	inner_l4_payload = new_prefix + ipxl_l4_min_len(inner4->protocol);
+	inner_l4_payload = new_prefix + ipxlat_l4_min_len(inner4->protocol);
 	if (unlikely(skb_ensure_writable(skb, inner_l4_payload)))
 		return -ENOMEM;
 
-	return ipxl_46_icmp_inner_l4(skb, new_prefix, inner4, inner_ip6);
+	return ipxlat_46_icmp_inner_l4(skb, new_prefix, inner4, inner_ip6);
 }
 
 /* Adjust ICMP error quoted-datagram/extensions after inner 4->6 translation.
@@ -399,7 +399,7 @@ static int ipxl_46_icmp_inner(struct ipxl_priv *ipxl, struct sk_buff *skb,
  * RFC 4884 delimiter/padding, preserves extensions only when allowed, and
  * enforces IPv6 minimum-MTU packet size constraints.
  */
-static int ipxl_46_icmp_squeeze_ext(struct sk_buff *skb, unsigned int icmp4_ipl,
+static int ipxlat_46_icmp_squeeze_ext(struct sk_buff *skb, unsigned int icmp4_ipl,
 				    int inner_delta, bool ie_forbidden)
 {
 	unsigned int icmp6_iel_in, icmp6_iel_out, max_iel, outer_hdrs_len,
@@ -454,7 +454,7 @@ static int ipxl_46_icmp_squeeze_ext(struct sk_buff *skb, unsigned int icmp4_ipl,
 			return err;
 	}
 
-	err = ipxl_icmp_relayout(skb, outer_hdrs_len, icmp6_ipl_in_bytes,
+	err = ipxlat_icmp_relayout(skb, outer_hdrs_len, icmp6_ipl_in_bytes,
 				 icmp6_iel_in, icmp6_ipl_out_bytes, out_pad,
 				 icmp6_iel_out);
 	if (unlikely(err))
@@ -479,8 +479,8 @@ no_extensions:
 }
 
 /**
- * ipxl_46_icmp_error - translate ICMPv4 error payload to ICMPv6 error form
- * @ipxl: translator private context
+ * ipxlat_46_icmp_error - translate ICMPv4 error payload to ICMPv6 error form
+ * @ipxlat: translator private context
  * @skb: packet carrying outer ICMPv4 error
  *
  * Rewrites the quoted inner datagram in place, maps type/code/fields and
@@ -488,9 +488,9 @@ no_extensions:
  *
  * Return: 0 on success, negative errno on translation failure.
  */
-static int ipxl_46_icmp_error(struct ipxl_priv *ipxl, struct sk_buff *skb)
+static int ipxlat_46_icmp_error(struct ipxlat_priv *ipxlat, struct sk_buff *skb)
 {
-	const struct ipxl_cb *cb = ipxl_skb_cb(skb);
+	const struct ipxlat_cb *cb = ipxlat_skb_cb(skb);
 	const struct icmphdr icmp4 = *icmp_hdr(skb);
 	struct iphdr inner4_ip;
 	int inner_delta, err;
@@ -502,16 +502,16 @@ static int ipxl_46_icmp_error(struct ipxl_priv *ipxl, struct sk_buff *skb)
 	}
 
 	/* translate quoted inner packet headers */
-	err = ipxl_46_icmp_inner(ipxl, skb, &inner4_ip, &inner_delta);
+	err = ipxlat_46_icmp_inner(ipxlat, skb, &inner4_ip, &inner_delta);
 	if (unlikely(err))
 		return err;
 
-	err = ipxl_46_map_icmp_type_code(ipxl, skb, &icmp4, icmp6_hdr(skb),
+	err = ipxlat_46_map_icmp_type_code(ipxlat, skb, &icmp4, icmp6_hdr(skb),
 					 &inner4_ip, &ie_forbidden);
 	if (unlikely(err))
 		return err;
 
-	err = ipxl_46_icmp_squeeze_ext(skb, icmp4.un.reserved[1] << 2,
+	err = ipxlat_46_icmp_squeeze_ext(skb, icmp4.un.reserved[1] << 2,
 				       inner_delta, ie_forbidden);
 	if (unlikely(err))
 		return err;
@@ -521,17 +521,17 @@ static int ipxl_46_icmp_error(struct ipxl_priv *ipxl, struct sk_buff *skb)
 	 */
 	icmp6_hdr(skb)->icmp6_cksum = 0;
 	icmp6_hdr(skb)->icmp6_cksum =
-		ipxl_l4_csum_ipv6(&ipv6_hdr(skb)->saddr, &ipv6_hdr(skb)->daddr,
+		ipxlat_l4_csum_ipv6(&ipv6_hdr(skb)->saddr, &ipv6_hdr(skb)->daddr,
 				  skb, skb_transport_offset(skb),
-				  ipxl_skb_datagram_len(skb), IPPROTO_ICMPV6);
+				  ipxlat_skb_datagram_len(skb), IPPROTO_ICMPV6);
 	skb->ip_summed = CHECKSUM_NONE;
 	return 0;
 }
 
-int ipxl_46_icmp(struct ipxl_priv *ipxl, struct sk_buff *skb)
+int ipxlat_46_icmp(struct ipxlat_priv *ipxlat, struct sk_buff *skb)
 {
-	if (unlikely(ipxl_skb_cb(skb)->is_icmp_err))
-		return ipxl_46_icmp_error(ipxl, skb);
+	if (unlikely(ipxlat_skb_cb(skb)->is_icmp_err))
+		return ipxlat_46_icmp_error(ipxlat, skb);
 
-	return ipxl_46_icmp_info_outer(skb);
+	return ipxlat_46_icmp_info_outer(skb);
 }

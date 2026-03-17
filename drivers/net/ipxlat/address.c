@@ -11,13 +11,13 @@
 
 #include "address.h"
 
-static bool ipxl_prefix6_contains(const struct ipv6_prefix *prefix,
+static bool ipxlat_prefix6_contains(const struct ipv6_prefix *prefix,
 				  const struct in6_addr *addr)
 {
 	return ipv6_prefix_equal(&prefix->addr, addr, prefix->len);
 }
 
-static __be32 ipxl_64_extract_addr(const struct in6_addr *src, unsigned int q1,
+static __be32 ipxlat_64_extract_addr(const struct in6_addr *src, unsigned int q1,
 				   unsigned int q2, unsigned int q3,
 				   unsigned int q4)
 {
@@ -28,7 +28,7 @@ static __be32 ipxl_64_extract_addr(const struct in6_addr *src, unsigned int q1,
 	return htonl((q1 << 24) | (q2 << 16) | (q3 << 8) | q4);
 }
 
-static void ipxl_46_embed_addr(__be32 __src, struct in6_addr *dst,
+static void ipxlat_46_embed_addr(__be32 __src, struct in6_addr *dst,
 			       unsigned int q1, unsigned int q2,
 			       unsigned int q3, unsigned int q4)
 {
@@ -40,7 +40,7 @@ static void ipxl_46_embed_addr(__be32 __src, struct in6_addr *dst,
 	dst->s6_addr[q4] = ((src) & 0xFF);
 }
 
-void ipxl_46_convert_addr(const struct ipv6_prefix *xlat_prefix6, __be32 addr4,
+void ipxlat_46_convert_addr(const struct ipv6_prefix *xlat_prefix6, __be32 addr4,
 			  struct in6_addr *addr6)
 {
 	*addr6 = xlat_prefix6->addr;
@@ -50,16 +50,16 @@ void ipxl_46_convert_addr(const struct ipv6_prefix *xlat_prefix6, __be32 addr4,
 		addr6->s6_addr32[3] = addr4;
 		return;
 	case 64:
-		ipxl_46_embed_addr(addr4, addr6, 9, 10, 11, 12);
+		ipxlat_46_embed_addr(addr4, addr6, 9, 10, 11, 12);
 		return;
 	case 56:
-		ipxl_46_embed_addr(addr4, addr6, 7, 9, 10, 11);
+		ipxlat_46_embed_addr(addr4, addr6, 7, 9, 10, 11);
 		return;
 	case 48:
-		ipxl_46_embed_addr(addr4, addr6, 6, 7, 9, 10);
+		ipxlat_46_embed_addr(addr4, addr6, 6, 7, 9, 10);
 		return;
 	case 40:
-		ipxl_46_embed_addr(addr4, addr6, 5, 6, 7, 9);
+		ipxlat_46_embed_addr(addr4, addr6, 5, 6, 7, 9);
 		return;
 	case 32:
 		addr6->s6_addr32[1] = addr4;
@@ -69,17 +69,17 @@ void ipxl_46_convert_addr(const struct ipv6_prefix *xlat_prefix6, __be32 addr4,
 	DEBUG_NET_WARN_ON_ONCE(1);
 }
 
-int ipxl_64_convert_addrs(const struct ipxl_cfg *cfg,
+int ipxlat_64_convert_addrs(const struct ipxlat_cfg *cfg,
 			  const struct ipv6hdr *hdr6, bool icmp_err,
 			  __be32 *src, __be32 *dst)
 {
 	const struct ipv6_prefix *xlat_prefix6 = &cfg->xlat_prefix6;
 	bool src_ok;
 
-	src_ok = ipxl_prefix6_contains(xlat_prefix6, &hdr6->saddr);
+	src_ok = ipxlat_prefix6_contains(xlat_prefix6, &hdr6->saddr);
 	if (unlikely(!src_ok && !icmp_err))
 		return -EINVAL;
-	if (unlikely(!ipxl_prefix6_contains(xlat_prefix6, &hdr6->daddr)))
+	if (unlikely(!ipxlat_prefix6_contains(xlat_prefix6, &hdr6->daddr)))
 		return -EINVAL;
 
 	switch (xlat_prefix6->len) {
@@ -90,24 +90,24 @@ int ipxl_64_convert_addrs(const struct ipxl_cfg *cfg,
 		break;
 	case 64:
 		if (likely(src_ok))
-			*src = ipxl_64_extract_addr(&hdr6->saddr, 9, 10, 11,
+			*src = ipxlat_64_extract_addr(&hdr6->saddr, 9, 10, 11,
 						    12);
-		*dst = ipxl_64_extract_addr(&hdr6->daddr, 9, 10, 11, 12);
+		*dst = ipxlat_64_extract_addr(&hdr6->daddr, 9, 10, 11, 12);
 		break;
 	case 56:
 		if (likely(src_ok))
-			*src = ipxl_64_extract_addr(&hdr6->saddr, 7, 9, 10, 11);
-		*dst = ipxl_64_extract_addr(&hdr6->daddr, 7, 9, 10, 11);
+			*src = ipxlat_64_extract_addr(&hdr6->saddr, 7, 9, 10, 11);
+		*dst = ipxlat_64_extract_addr(&hdr6->daddr, 7, 9, 10, 11);
 		break;
 	case 48:
 		if (likely(src_ok))
-			*src = ipxl_64_extract_addr(&hdr6->saddr, 6, 7, 9, 10);
-		*dst = ipxl_64_extract_addr(&hdr6->daddr, 6, 7, 9, 10);
+			*src = ipxlat_64_extract_addr(&hdr6->saddr, 6, 7, 9, 10);
+		*dst = ipxlat_64_extract_addr(&hdr6->daddr, 6, 7, 9, 10);
 		break;
 	case 40:
 		if (likely(src_ok))
-			*src = ipxl_64_extract_addr(&hdr6->saddr, 5, 6, 7, 9);
-		*dst = ipxl_64_extract_addr(&hdr6->daddr, 5, 6, 7, 9);
+			*src = ipxlat_64_extract_addr(&hdr6->saddr, 5, 6, 7, 9);
+		*dst = ipxlat_64_extract_addr(&hdr6->daddr, 5, 6, 7, 9);
 		break;
 	case 32:
 		if (likely(src_ok))

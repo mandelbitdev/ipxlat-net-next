@@ -18,18 +18,18 @@
 #include "packet.h"
 #include "transport.h"
 
-u8 ipxl_64_map_nexthdr_proto(u8 nexthdr)
+u8 ipxlat_64_map_nexthdr_proto(u8 nexthdr)
 {
 	return (nexthdr == NEXTHDR_ICMP) ? IPPROTO_ICMP : nexthdr;
 }
 
-void ipxl_64_build_l3(struct iphdr *iph4, const struct ipv6hdr *iph6,
+void ipxlat_64_build_l3(struct iphdr *iph4, const struct ipv6hdr *iph6,
 		      unsigned int tot_len, __be16 frag_off, u8 protocol,
 		      __be32 saddr, __be32 daddr, u8 ttl, __be16 id)
 {
 	iph4->version = 4;
 	iph4->ihl = 5;
-	iph4->tos = ipxl_get_ipv6_tclass(iph6);
+	iph4->tos = ipxlat_get_ipv6_tclass(iph6);
 	iph4->tot_len = cpu_to_be16(tot_len);
 	iph4->frag_off = frag_off;
 	iph4->ttl = ttl;
@@ -41,41 +41,41 @@ void ipxl_64_build_l3(struct iphdr *iph4, const struct ipv6hdr *iph6,
 	iph4->check = ip_fast_csum(iph4, iph4->ihl);
 }
 
-static __be16 ipxl_64_build_frag_off(const struct sk_buff *skb,
+static __be16 ipxlat_64_build_frag_off(const struct sk_buff *skb,
 				     const struct frag_hdr *frag6, u8 l4_proto)
 {
 	bool df;
 
 	/* preserve real IPv6 fragmentation state when a Fragment Header exists */
 	if (frag6)
-		return ipxl_build_frag4_offset(false,
+		return ipxlat_build_frag4_offset(false,
 					       !!(be16_to_cpu(frag6->frag_off) &
 						  IP6_MF),
-					       ipxl_get_frag6_offset(frag6));
+					       ipxlat_get_frag6_offset(frag6));
 
 	/* frag_list implies segmented payload that will be emitted as fragments */
 	if (skb_has_frag_list(skb))
-		return ipxl_build_frag4_offset(false, false, 0);
+		return ipxlat_build_frag4_offset(false, false, 0);
 
 	if (skb_is_gso(skb)) {
 		/* GSO frames are logically one large datagram here; set DF only
 		 * for TCP when a later segmentation would exceed IPv6 minimum MTU
 		 */
 		df = (l4_proto == IPPROTO_TCP) &&
-		     (ipxl_skb_cb(skb)->payload_off +
+		     (ipxlat_skb_cb(skb)->payload_off +
 			      skb_shinfo(skb)->gso_size >
 		      (IPV6_MIN_MTU - sizeof(struct iphdr)));
-		return ipxl_build_frag4_offset(df, false, 0);
+		return ipxlat_build_frag4_offset(df, false, 0);
 	}
 
-	return ipxl_build_frag4_offset(skb->len > (IPV6_MIN_MTU -
+	return ipxlat_build_frag4_offset(skb->len > (IPV6_MIN_MTU -
 						   sizeof(struct iphdr)),
 				       false, 0);
 }
 
 /**
- * ipxl_64_translate - translate one validated packet from IPv6 to IPv4
- * @ipxl: translator private context
+ * ipxlat_64_translate - translate one validated packet from IPv6 to IPv4
+ * @ipxlat: translator private context
  * @skb: packet to translate
  *
  * Rewrites outer L3 in place, rebases cached offsets and translates L4 on
@@ -83,12 +83,12 @@ static __be16 ipxl_64_build_frag_off(const struct sk_buff *skb,
  *
  * Return: 0 on success, negative errno on translation failure.
  */
-int ipxl_64_translate(struct ipxl_priv *ipxl, struct sk_buff *skb)
+int ipxlat_64_translate(struct ipxlat_priv *ipxlat, struct sk_buff *skb)
 {
 	unsigned int min_l4_len, old_l3_len, new_l3_len;
 	bool is_icmp_err, has_frag, first_frag;
 	struct ipv6hdr outer6 = *ipv6_hdr(skb);
-	struct ipxl_cb *cb = ipxl_skb_cb(skb);
+	struct ipxlat_cb *cb = ipxlat_skb_cb(skb);
 	u8 in_l4_proto, out_l4_proto;
 	struct frag_hdr frag_copy;
 	struct frag_hdr *frag6;
@@ -103,7 +103,7 @@ int ipxl_64_translate(struct ipxl_priv *ipxl, struct sk_buff *skb)
 	has_frag = !!frag6;
 	in_l4_proto = cb->l4_proto;
 	is_icmp_err = cb->is_icmp_err;
-	out_l4_proto = ipxl_64_map_nexthdr_proto(in_l4_proto);
+	out_l4_proto = ipxlat_64_map_nexthdr_proto(in_l4_proto);
 
 	old_l3_len = cb->l3_hdr_len;
 	new_l3_len = sizeof(struct iphdr);
@@ -111,7 +111,7 @@ int ipxl_64_translate(struct ipxl_priv *ipxl, struct sk_buff *skb)
 
 	if (unlikely(has_frag))
 		frag_copy = *frag6;
-	first_frag = ipxl_is_first_frag6(has_frag ? &frag_copy : NULL);
+	first_frag = ipxlat_is_first_frag6(has_frag ? &frag_copy : NULL);
 
 	if (unlikely(is_icmp_err)) {
 		if (unlikely(in_l4_proto != NEXTHDR_ICMP))
@@ -119,7 +119,7 @@ int ipxl_64_translate(struct ipxl_priv *ipxl, struct sk_buff *skb)
 	}
 
 	/* derive translated IPv4 endpoints */
-	err = ipxl_64_convert_addrs(&ipxl->cfg, &outer6, is_icmp_err, &saddr,
+	err = ipxlat_64_convert_addrs(&ipxlat->cfg, &outer6, is_icmp_err, &saddr,
 				    &daddr);
 	if (unlikely(err))
 		return err;
@@ -138,7 +138,7 @@ int ipxl_64_translate(struct ipxl_priv *ipxl, struct sk_buff *skb)
 	 * rebasing. A failure here means internal metadata inconsistency, not
 	 * a packet validation outcome.
 	 */
-	err = ipxl_cb_rebase_offsets(cb, l3_delta);
+	err = ipxlat_cb_rebase_offsets(cb, l3_delta);
 	if (unlikely(err)) {
 		DEBUG_NET_WARN_ON_ONCE(1);
 		return err;
@@ -147,22 +147,22 @@ int ipxl_64_translate(struct ipxl_priv *ipxl, struct sk_buff *skb)
 	cb->l3_hdr_len = sizeof(struct iphdr);
 	cb->fragh_off = 0;
 	cb->l4_proto = out_l4_proto;
-	DEBUG_NET_WARN_ON_ONCE(!ipxl_cb_offsets_valid(cb));
+	DEBUG_NET_WARN_ON_ONCE(!ipxlat_cb_offsets_valid(cb));
 
 	/* build outer IPv4 base hdr from translated IPv6 fields */
 	iph4 = ip_hdr(skb);
-	frag_off = ipxl_64_build_frag_off(skb, has_frag ? &frag_copy : NULL,
+	frag_off = ipxlat_64_build_frag_off(skb, has_frag ? &frag_copy : NULL,
 					  out_l4_proto);
 	/* when source had Fragment Header we preserve its identification;
 	 * otherwise allocate a fresh IPv4 ID for the translated packet
 	 */
 	id = has_frag ? cpu_to_be16(be32_to_cpu(frag_copy.identification)) : 0;
-	ipxl_64_build_l3(iph4, &outer6, skb->len, frag_off, out_l4_proto, saddr,
+	ipxlat_64_build_l3(iph4, &outer6, skb->len, frag_off, out_l4_proto, saddr,
 			 daddr, outer6.hop_limit - 1, id);
 
 	if (likely(!has_frag)) {
 		iph4->id = 0;
-		__ip_select_ident(dev_net(ipxl->dev), iph4, 1);
+		__ip_select_ident(dev_net(ipxlat->dev), iph4, 1);
 		iph4->check = 0;
 		iph4->check = ip_fast_csum(iph4, iph4->ihl);
 	}
@@ -172,7 +172,7 @@ int ipxl_64_translate(struct ipxl_priv *ipxl, struct sk_buff *skb)
 		goto out;
 
 	/* ensure transport bytes are writable before L4 csum/proto rewrites */
-	min_l4_len = ipxl_l4_min_len(out_l4_proto);
+	min_l4_len = ipxlat_l4_min_len(out_l4_proto);
 	if (unlikely(skb_ensure_writable(skb, skb_transport_offset(skb) +
 						      min_l4_len)))
 		return -ENOMEM;
@@ -180,13 +180,13 @@ int ipxl_64_translate(struct ipxl_priv *ipxl, struct sk_buff *skb)
 	/* translate transport hdr and pseudohdr dependent checksums */
 	switch (out_l4_proto) {
 	case IPPROTO_TCP:
-		err = ipxl_64_outer_tcp(skb, &outer6);
+		err = ipxlat_64_outer_tcp(skb, &outer6);
 		break;
 	case IPPROTO_UDP:
-		err = ipxl_64_outer_udp(skb, &outer6);
+		err = ipxlat_64_outer_udp(skb, &outer6);
 		break;
 	case IPPROTO_ICMP:
-		err = ipxl_64_icmp(ipxl, skb, &outer6);
+		err = ipxlat_64_icmp(ipxlat, skb, &outer6);
 		break;
 	default:
 		err = 0;
@@ -197,6 +197,6 @@ int ipxl_64_translate(struct ipxl_priv *ipxl, struct sk_buff *skb)
 
 out:
 	/* normalize checksum/offload metadata for the translated frame */
-	return ipxl_finalize_offload(skb, out_l4_proto, ip_is_fragment(iph4),
+	return ipxlat_finalize_offload(skb, out_l4_proto, ip_is_fragment(iph4),
 				     SKB_GSO_TCPV6, SKB_GSO_TCPV4);
 }

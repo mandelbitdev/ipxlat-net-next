@@ -17,7 +17,7 @@
 #include "ipxlpriv.h"
 
 /**
- * struct ipxl_cb - per-skb parser and control metadata stored in skb->cb
+ * struct ipxlat_cb - per-skb parser and control metadata stored in skb->cb
  * @l4_off: outer L4 header offset
  * @payload_off: outer payload offset
  * @fragh_off: outer IPv6 Fragment Header offset, or 0 if absent
@@ -37,7 +37,7 @@
  * @icmp_err.code: ICMP code to emit
  * @icmp_err.info: ICMP auxiliary info (e.g. pointer/MTU)
  */
-struct ipxl_cb {
+struct ipxlat_cb {
 	u16 l4_off;
 	u16 payload_off;
 	u16 fragh_off;
@@ -63,101 +63,101 @@ struct ipxl_cb {
 };
 
 /**
- * ipxl_skb_cb - return ipxlat private control block in skb->cb
+ * ipxlat_skb_cb - return ipxlat private control block in skb->cb
  * @skb: skb carrying ipxlat metadata
  *
- * Return: pointer to %struct ipxl_cb stored in @skb->cb.
+ * Return: pointer to %struct ipxlat_cb stored in @skb->cb.
  */
-static inline struct ipxl_cb *ipxl_skb_cb(const struct sk_buff *skb)
+static inline struct ipxlat_cb *ipxlat_skb_cb(const struct sk_buff *skb)
 {
-	BUILD_BUG_ON(sizeof(struct ipxl_cb) > sizeof(skb->cb));
-	return (struct ipxl_cb *)(skb->cb);
+	BUILD_BUG_ON(sizeof(struct ipxlat_cb) > sizeof(skb->cb));
+	return (struct ipxlat_cb *)(skb->cb);
 }
 
-static inline unsigned int ipxl_skb_datagram_len(const struct sk_buff *skb)
+static inline unsigned int ipxlat_skb_datagram_len(const struct sk_buff *skb)
 {
 	return skb->len - skb_transport_offset(skb);
 }
 
-static inline u8 ipxl_get_ipv6_tclass(const struct ipv6hdr *hdr)
+static inline u8 ipxlat_get_ipv6_tclass(const struct ipv6hdr *hdr)
 {
 	return (hdr->priority << 4) | (hdr->flow_lbl[0] >> 4);
 }
 
-static inline u16 ipxl_get_frag6_offset(const struct frag_hdr *hdr)
+static inline u16 ipxlat_get_frag6_offset(const struct frag_hdr *hdr)
 {
 	return be16_to_cpu(hdr->frag_off) & 0xFFF8U;
 }
 
-static inline u16 ipxl_get_frag4_offset(const struct iphdr *hdr)
+static inline u16 ipxlat_get_frag4_offset(const struct iphdr *hdr)
 {
 	return (be16_to_cpu(hdr->frag_off) & IP_OFFSET) << 3;
 }
 
-static inline bool ipxl_is_first_frag6(const struct frag_hdr *hdr)
+static inline bool ipxlat_is_first_frag6(const struct frag_hdr *hdr)
 {
-	return hdr ? (ipxl_get_frag6_offset(hdr) == 0) : true;
+	return hdr ? (ipxlat_get_frag6_offset(hdr) == 0) : true;
 }
 
-static inline bool ipxl_is_first_frag4(const struct iphdr *hdr)
+static inline bool ipxlat_is_first_frag4(const struct iphdr *hdr)
 {
 	return !(hdr->frag_off & htons(IP_OFFSET));
 }
 
-static inline __be16 ipxl_build_frag6_offset(u16 frag_offset, bool mf)
+static inline __be16 ipxlat_build_frag6_offset(u16 frag_offset, bool mf)
 {
 	return cpu_to_be16((frag_offset & 0xFFF8U) | mf);
 }
 
-static inline __be16 ipxl_build_frag4_offset(bool df, bool mf, u16 frag_offset)
+static inline __be16 ipxlat_build_frag4_offset(bool df, bool mf, u16 frag_offset)
 {
 	return cpu_to_be16((df ? (1U << 14) : 0) | (mf ? (1U << 13) : 0) |
 			   (frag_offset >> 3));
 }
 
 /**
- * ipxl_cb_rebase_offsets - shift cached cb offsets after skb relayout
+ * ipxlat_cb_rebase_offsets - shift cached cb offsets after skb relayout
  * @cb: parsed packet metadata
  * @delta: signed byte delta applied to cached offsets
  *
  * Return: 0 on success, negative errno if rebased offsets would underflow.
  */
-int ipxl_cb_rebase_offsets(struct ipxl_cb *cb, int delta);
+int ipxlat_cb_rebase_offsets(struct ipxlat_cb *cb, int delta);
 #ifdef CONFIG_DEBUG_NET
 /**
- * ipxl_cb_offsets_valid - validate monotonicity and bounds of cb offsets
+ * ipxlat_cb_offsets_valid - validate monotonicity and bounds of cb offsets
  * @cb: parsed packet metadata
  *
  * Return: true if cached offsets are internally consistent.
  */
-bool ipxl_cb_offsets_valid(const struct ipxl_cb *cb);
+bool ipxlat_cb_offsets_valid(const struct ipxlat_cb *cb);
 #else
-static inline bool ipxl_cb_offsets_valid(const struct ipxl_cb *cb)
+static inline bool ipxlat_cb_offsets_valid(const struct ipxlat_cb *cb)
 {
 	return true;
 }
 #endif
 
 /**
- * ipxl_v4_validate_skb - validate and summarize IPv4 packet into skb->cb
- * @ipxl: translator private context
+ * ipxlat_v4_validate_skb - validate and summarize IPv4 packet into skb->cb
+ * @ipxlat: translator private context
  * @skb: packet to validate
  *
- * Populates %struct ipxl_cb and may mark translator-generated ICMP action on
+ * Populates %struct ipxlat_cb and may mark translator-generated ICMP action on
  * failure paths.
  *
  * Return: 0 on success, negative errno on validation failure.
  */
-int ipxl_v4_validate_skb(struct ipxl_priv *ipxl, struct sk_buff *skb);
+int ipxlat_v4_validate_skb(struct ipxlat_priv *ipxlat, struct sk_buff *skb);
 
 /**
- * ipxl_v6_validate_skb - validate and summarize IPv6 packet into skb->cb
+ * ipxlat_v6_validate_skb - validate and summarize IPv6 packet into skb->cb
  * @skb: packet to validate
  *
- * Populates %struct ipxl_cb for subsequent 6->4 translation.
+ * Populates %struct ipxlat_cb for subsequent 6->4 translation.
  *
  * Return: 0 on success, negative errno on validation failure.
  */
-int ipxl_v6_validate_skb(struct sk_buff *skb);
+int ipxlat_v6_validate_skb(struct sk_buff *skb);
 
 #endif /* _NET_IPXLAT_PACKET_H_ */

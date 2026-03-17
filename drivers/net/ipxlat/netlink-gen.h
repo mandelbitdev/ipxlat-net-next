@@ -4,28 +4,28 @@
 /* YNL-GEN kernel header */
 /* To regenerate run: tools/net/ynl/ynl-regen.sh */
 
-#ifndef _LINUX_IPXL_GEN_H
-#define _LINUX_IPXL_GEN_H
+#ifndef _LINUX_IPXLAT_GEN_H
+#define _LINUX_IPXLAT_GEN_H
 
 #include <net/netlink.h>
 #include <net/genetlink.h>
 
-#include <uapi/linux/ipxl.h>
+#include <uapi/linux/ipxlat.h>
 
 /* Common nested types */
-extern const struct nla_policy ipxl_cfg_nl_policy[IPXL_A_CFG_LOWEST_IPV6_MTU + 1];
-extern const struct nla_policy ipxl_pool_nl_policy[IPXL_A_POOL_PREFIX_LEN + 1];
+extern const struct nla_policy ipxlat_cfg_nl_policy[IPXLAT_A_CFG_LOWEST_IPV6_MTU + 1];
+extern const struct nla_policy ipxlat_pool_nl_policy[IPXLAT_A_POOL_PREFIX_LEN + 1];
 
-int ipxl_nl_pre_doit(const struct genl_split_ops *ops, struct sk_buff *skb,
-		     struct genl_info *info);
+int ipxlat_nl_pre_doit(const struct genl_split_ops *ops, struct sk_buff *skb,
+		       struct genl_info *info);
 void
-ipxl_nl_post_doit(const struct genl_split_ops *ops, struct sk_buff *skb,
-		  struct genl_info *info);
+ipxlat_nl_post_doit(const struct genl_split_ops *ops, struct sk_buff *skb,
+		    struct genl_info *info);
 
-int ipxl_nl_dev_get_doit(struct sk_buff *skb, struct genl_info *info);
-int ipxl_nl_dev_get_dumpit(struct sk_buff *skb, struct netlink_callback *cb);
-int ipxl_nl_dev_set_doit(struct sk_buff *skb, struct genl_info *info);
+int ipxlat_nl_dev_get_doit(struct sk_buff *skb, struct genl_info *info);
+int ipxlat_nl_dev_get_dumpit(struct sk_buff *skb, struct netlink_callback *cb);
+int ipxlat_nl_dev_set_doit(struct sk_buff *skb, struct genl_info *info);
 
-extern struct genl_family ipxl_nl_family;
+extern struct genl_family ipxlat_nl_family;
 
-#endif /* _LINUX_IPXL_GEN_H */
+#endif /* _LINUX_IPXLAT_GEN_H */

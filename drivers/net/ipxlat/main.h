@@ -15,11 +15,11 @@
 #include <linux/netdevice.h>
 
 /**
- * ipxl_dev_is_valid - tell whether a netdev is an ipxlat interface
+ * ipxlat_dev_is_valid - tell whether a netdev is an ipxlat interface
  * @dev: netdevice to inspect
  *
  * Return: true if @dev was created with ipxlat link ops.
  */
-bool ipxl_dev_is_valid(const struct net_device *dev);
+bool ipxlat_dev_is_valid(const struct net_device *dev);
 
 #endif /* _NET_IPXLAT_MAIN_H_ */

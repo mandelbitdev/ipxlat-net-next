@@ -17,31 +17,31 @@
 #include "translate_64.h"
 #include "transport.h"
 
-#define IPXL_ICMP4_ERROR_MAX_LEN 576U
+#define IPXLAT_ICMP4_ERROR_MAX_LEN 576U
 
 /* RFC 7915 Section 5.2, Figure 4 */
-static const u8 ipxl_64_icmp_param_prob_map[] = {
+static const u8 ipxlat_64_icmp_param_prob_map[] = {
 	0,  1,	0xff, 0xff, 2,	2,  9,	8,  12, 12, 12, 12, 12, 12,
 	12, 12, 12,   12,   12, 12, 12, 12, 12, 12, 16, 16, 16, 16,
 	16, 16, 16,   16,   16, 16, 16, 16, 16, 16, 16, 16,
 };
 
-static int ipxl_64_map_icmp_param_prob(u32 ptr6, u32 *ptr4)
+static int ipxlat_64_map_icmp_param_prob(u32 ptr6, u32 *ptr4)
 {
-	if (unlikely(ptr6 >= ARRAY_SIZE(ipxl_64_icmp_param_prob_map) ||
-		     ipxl_64_icmp_param_prob_map[ptr6] == 0xff))
+	if (unlikely(ptr6 >= ARRAY_SIZE(ipxlat_64_icmp_param_prob_map) ||
+		     ipxlat_64_icmp_param_prob_map[ptr6] == 0xff))
 		return -EPROTONOSUPPORT;
 
-	*ptr4 = ipxl_64_icmp_param_prob_map[ptr6];
+	*ptr4 = ipxlat_64_icmp_param_prob_map[ptr6];
 	return 0;
 }
 
-static void ipxl_icmp4_set_param_ptr(struct icmphdr *ic4, u8 ptr)
+static void ipxlat_icmp4_set_param_ptr(struct icmphdr *ic4, u8 ptr)
 {
 	ic4->un.gateway = htonl((u32)ptr << 24);
 }
 
-static int ipxl_64_map_icmp_info_type_code(const struct icmp6hdr *in,
+static int ipxlat_64_map_icmp_info_type_code(const struct icmp6hdr *in,
 					   struct icmphdr *out)
 {
 	switch (in->icmp6_type) {
@@ -66,7 +66,7 @@ static int ipxl_64_map_icmp_info_type_code(const struct icmp6hdr *in,
  * Falls back to translator MTU on routing failures and clamps route MTU
  * against translator egress MTU.
  */
-static unsigned int ipxl_64_lookup_pmtu4(struct ipxl_priv *ipxl,
+static unsigned int ipxlat_64_lookup_pmtu4(struct ipxlat_priv *ipxlat,
 					 const struct sk_buff *skb)
 {
 	const struct iphdr *iph4;
@@ -75,7 +75,7 @@ static unsigned int ipxl_64_lookup_pmtu4(struct ipxl_priv *ipxl,
 	struct rtable *rt;
 	unsigned int mtu4;
 
-	dev_mtu = READ_ONCE(ipxl->dev->mtu);
+	dev_mtu = READ_ONCE(ipxlat->dev->mtu);
 	iph4 = ip_hdr(skb);
 
 	fl4.daddr = iph4->daddr;
@@ -83,7 +83,7 @@ static unsigned int ipxl_64_lookup_pmtu4(struct ipxl_priv *ipxl,
 	fl4.flowi4_mark = skb->mark;
 	fl4.flowi4_proto = IPPROTO_ICMP;
 
-	rt = ip_route_output_key(dev_net(ipxl->dev), &fl4);
+	rt = ip_route_output_key(dev_net(ipxlat->dev), &fl4);
 	if (IS_ERR(rt))
 		return dev_mtu;
 
@@ -94,7 +94,7 @@ static unsigned int ipxl_64_lookup_pmtu4(struct ipxl_priv *ipxl,
 	return mtu4;
 }
 
-static int ipxl_64_build_icmp4_errhdr(struct ipxl_priv *ipxl,
+static int ipxlat_64_build_icmp4_errhdr(struct ipxlat_priv *ipxlat,
 				      struct sk_buff *skb,
 				      const struct icmp6hdr *ic6,
 				      struct icmphdr *ic4, bool *ie_forbidden)
@@ -134,8 +134,8 @@ static int ipxl_64_build_icmp4_errhdr(struct ipxl_priv *ipxl,
 		ic4->type = ICMP_DEST_UNREACH;
 		ic4->code = ICMP_FRAG_NEEDED;
 		ic4->un.frag.__unused = 0;
-		in_mtu = ipxl_64_lookup_pmtu4(ipxl, skb);
-		out_mtu = READ_ONCE(ipxl->dev->mtu);
+		in_mtu = ipxlat_64_lookup_pmtu4(ipxlat, skb);
+		out_mtu = READ_ONCE(ipxlat->dev->mtu);
 		/* RFC 7915 Section 5.2:
 		 * min((PTB_mtu - 20), mtu4_nexthop, (mtu6_nexthop - 20))
 		 */
@@ -150,10 +150,10 @@ static int ipxl_64_build_icmp4_errhdr(struct ipxl_priv *ipxl,
 		case ICMPV6_HDR_FIELD:
 			ic4->type = ICMP_PARAMETERPROB;
 			ic4->code = 0;
-			err = ipxl_64_map_icmp_param_prob(ptr6, &ptr4);
+			err = ipxlat_64_map_icmp_param_prob(ptr6, &ptr4);
 			if (unlikely(err))
 				return err;
-			ipxl_icmp4_set_param_ptr(ic4, ptr4);
+			ipxlat_icmp4_set_param_ptr(ic4, ptr4);
 			break;
 		case ICMPV6_UNK_NEXTHDR:
 			ic4->type = ICMP_DEST_UNREACH;
@@ -170,7 +170,7 @@ static int ipxl_64_build_icmp4_errhdr(struct ipxl_priv *ipxl,
 	}
 }
 
-static __sum16 ipxl_64_compute_icmp_info_csum(const struct ipv6hdr *in6,
+static __sum16 ipxlat_64_compute_icmp_info_csum(const struct ipv6hdr *in6,
 					      const struct icmp6hdr *in_icmp6,
 					      const struct icmphdr *out_icmp4,
 					      unsigned int l4_len)
@@ -193,7 +193,7 @@ static __sum16 ipxl_64_compute_icmp_info_csum(const struct ipv6hdr *in6,
 	return csum_fold(csum);
 }
 
-static int ipxl_64_icmp_info(struct sk_buff *skb, const struct ipv6hdr *in6)
+static int ipxlat_64_icmp_info(struct sk_buff *skb, const struct ipv6hdr *in6)
 {
 	struct icmp6hdr ic6_copy, *ic6;
 	struct icmphdr *ic4;
@@ -203,17 +203,17 @@ static int ipxl_64_icmp_info(struct sk_buff *skb, const struct ipv6hdr *in6)
 	ic6_copy = *ic6;
 
 	ic4 = (struct icmphdr *)(skb->data + skb_transport_offset(skb));
-	err = ipxl_64_map_icmp_info_type_code(&ic6_copy, ic4);
+	err = ipxlat_64_map_icmp_info_type_code(&ic6_copy, ic4);
 	if (unlikely(err))
 		return err;
 
-	ic4->checksum = ipxl_64_compute_icmp_info_csum(in6, &ic6_copy, ic4,
-						       ipxl_skb_datagram_len(skb));
+	ic4->checksum = ipxlat_64_compute_icmp_info_csum(in6, &ic6_copy, ic4,
+						       ipxlat_skb_datagram_len(skb));
 	skb->ip_summed = CHECKSUM_NONE;
 	return 0;
 }
 
-static int ipxl_64_icmp_inner_info(struct sk_buff *skb,
+static int ipxlat_64_icmp_inner_info(struct sk_buff *skb,
 				   unsigned int inner_l4_off)
 {
 	struct icmphdr *ic4;
@@ -223,7 +223,7 @@ static int ipxl_64_icmp_inner_info(struct sk_buff *skb,
 	/* inner header alignment is not guaranteed */
 	memcpy(&ic6, skb->data + inner_l4_off, sizeof(ic6));
 	ic4 = (struct icmphdr *)(skb->data + inner_l4_off);
-	err = ipxl_64_map_icmp_info_type_code(&ic6, ic4);
+	err = ipxlat_64_map_icmp_info_type_code(&ic6, ic4);
 	if (unlikely(err))
 		return err;
 
@@ -234,7 +234,7 @@ static int ipxl_64_icmp_inner_info(struct sk_buff *skb,
 	return 0;
 }
 
-static int ipxl_64_icmp_inner_l4(struct sk_buff *skb, unsigned int inner_l4_off,
+static int ipxlat_64_icmp_inner_l4(struct sk_buff *skb, unsigned int inner_l4_off,
 				 const struct iphdr *inner4,
 				 const struct ipv6hdr *inner6)
 {
@@ -244,18 +244,18 @@ static int ipxl_64_icmp_inner_l4(struct sk_buff *skb, unsigned int inner_l4_off,
 	switch (inner4->protocol) {
 	case IPPROTO_TCP:
 		tcp = (struct tcphdr *)(skb->data + inner_l4_off);
-		return ipxl_64_inner_tcp(skb, inner6, inner4, tcp);
+		return ipxlat_64_inner_tcp(skb, inner6, inner4, tcp);
 	case IPPROTO_UDP:
 		udp = (struct udphdr *)(skb->data + inner_l4_off);
-		return ipxl_64_inner_udp(skb, inner6, inner4, udp);
+		return ipxlat_64_inner_udp(skb, inner6, inner4, udp);
 	case IPPROTO_ICMP:
-		return ipxl_64_icmp_inner_info(skb, inner_l4_off);
+		return ipxlat_64_icmp_inner_info(skb, inner_l4_off);
 	default:
 		return 0;
 	}
 }
 
-static int ipxl_64_icmp_inner(struct ipxl_priv *ipxl, struct sk_buff *skb,
+static int ipxlat_64_icmp_inner(struct ipxlat_priv *ipxlat, struct sk_buff *skb,
 			      int *inner_delta)
 {
 	unsigned int old_prefix, new_prefix, inner_l3_len, inner_tot_len,
@@ -263,7 +263,7 @@ static int ipxl_64_icmp_inner(struct ipxl_priv *ipxl, struct sk_buff *skb,
 	const unsigned int outer_l3_len = skb_transport_offset(skb);
 	const struct iphdr outer4_copy = *ip_hdr(skb);
 	bool has_inner_frag, first_inner_frag, mf, df;
-	const struct ipxl_cb *cb = ipxl_skb_cb(skb);
+	const struct ipxlat_cb *cb = ipxlat_skb_cb(skb);
 	struct frag_hdr inner_fragh;
 	struct ipv6hdr inner6;
 	struct iphdr *inner4;
@@ -277,7 +277,7 @@ static int ipxl_64_icmp_inner(struct ipxl_priv *ipxl, struct sk_buff *skb,
 	inner_l3_len = inner_l4_old_off - inner_l3_off;
 	outer_prefix = inner_l3_off;
 
-	inner_l4_proto = ipxl_64_map_nexthdr_proto(cb->inner_l4_proto);
+	inner_l4_proto = ipxlat_64_map_nexthdr_proto(cb->inner_l4_proto);
 	has_inner_frag = !!cb->inner_fragh_off;
 
 	/* inner header alignment is not guaranteed */
@@ -287,10 +287,10 @@ static int ipxl_64_icmp_inner(struct ipxl_priv *ipxl, struct sk_buff *skb,
 	if (unlikely(has_inner_frag)) {
 		memcpy(&inner_fragh, skb->data + cb->inner_fragh_off,
 		       sizeof(inner_fragh));
-		first_inner_frag = ipxl_is_first_frag6(&inner_fragh);
+		first_inner_frag = ipxlat_is_first_frag6(&inner_fragh);
 	}
 
-	err = ipxl_64_convert_addrs(&ipxl->cfg, &inner6, false, &saddr, &daddr);
+	err = ipxlat_64_convert_addrs(&ipxlat->cfg, &inner6, false, &saddr, &daddr);
 	if (unlikely(err))
 		return err;
 
@@ -317,12 +317,12 @@ static int ipxl_64_icmp_inner(struct ipxl_priv *ipxl, struct sk_buff *skb,
 	/* RFC 7915 Section 5.1 */
 	if (likely(!has_inner_frag)) {
 		df = inner_tot_len > (IPV6_MIN_MTU - sizeof(struct iphdr));
-		inner4->frag_off = ipxl_build_frag4_offset(df, false, 0);
+		inner4->frag_off = ipxlat_build_frag4_offset(df, false, 0);
 	} else {
 		mf = !!(be16_to_cpu(inner_fragh.frag_off) & IP6_MF);
 		inner4->frag_off =
-			ipxl_build_frag4_offset(false, mf,
-						ipxl_get_frag6_offset(&inner_fragh));
+			ipxlat_build_frag4_offset(false, mf,
+						ipxlat_get_frag6_offset(&inner_fragh));
 	}
 
 	/* keep low 16 bits of IPv6 Fragment ID as numeric value, then re-encode
@@ -331,13 +331,13 @@ static int ipxl_64_icmp_inner(struct ipxl_priv *ipxl, struct sk_buff *skb,
 	frag_id = has_inner_frag ?
 			  cpu_to_be16(be32_to_cpu(inner_fragh.identification)) :
 			  0;
-	ipxl_64_build_l3(inner4, &inner6, inner_tot_len, inner4->frag_off,
+	ipxlat_64_build_l3(inner4, &inner6, inner_tot_len, inner4->frag_off,
 			 inner_l4_proto, saddr, daddr, inner6.hop_limit,
 			 frag_id);
 
 	if (likely(!has_inner_frag)) {
 		inner4->id = 0;
-		__ip_select_ident(dev_net(ipxl->dev), inner4, 1);
+		__ip_select_ident(dev_net(ipxlat->dev), inner4, 1);
 		inner4->check = 0;
 		inner4->check = ip_fast_csum(inner4, inner4->ihl);
 	}
@@ -345,11 +345,11 @@ static int ipxl_64_icmp_inner(struct ipxl_priv *ipxl, struct sk_buff *skb,
 	if (unlikely(!first_inner_frag))
 		return 0;
 
-	inner_l4_payload = new_prefix + ipxl_l4_min_len(inner4->protocol);
+	inner_l4_payload = new_prefix + ipxlat_l4_min_len(inner4->protocol);
 	if (unlikely(skb_ensure_writable(skb, inner_l4_payload)))
 		return -ENOMEM;
 
-	return ipxl_64_icmp_inner_l4(skb, new_prefix, inner4, &inner6);
+	return ipxlat_64_icmp_inner_l4(skb, new_prefix, inner4, &inner6);
 }
 
 /* Rebuild ICMPv4 quoted-datagram/extensions after inner 6->4 translation.
@@ -358,13 +358,13 @@ static int ipxl_64_icmp_inner(struct ipxl_priv *ipxl, struct sk_buff *skb,
  * the RFC 4884 delimiter/padding and extension bytes, then enforces the
  * IPv4 ICMP error size cap.
  *
- * This is intentionally not a mirror of ipxl_46_icmp_squeeze_ext:
+ * This is intentionally not a mirror of ipxlat_46_icmp_squeeze_ext:
  * - 4->6 always writes icmp6_datagram_len (either computed or 0).
  * - 6->4 updates ICMPv4 datagram-length only when extensions are allowed.
  *   Some mapped ICMPv6 errors set ie_forbidden, and in that case we keep the
  *   ICMPv4 header semantics for that type/code and only relayout/trim payload.
  */
-static int ipxl_64_squeeze_icmp_ext(struct sk_buff *skb, unsigned int icmp6_ipl,
+static int ipxlat_64_squeeze_icmp_ext(struct sk_buff *skb, unsigned int icmp6_ipl,
 				    int inner_delta, bool ie_forbidden)
 {
 	unsigned int outer_hdrs_len, payload_len, icmp4_iel_in, icmp4_iel_out;
@@ -394,7 +394,7 @@ static int ipxl_64_squeeze_icmp_ext(struct sk_buff *skb, unsigned int icmp6_ipl,
 		goto finalize;
 
 	icmp4_iel_in = payload_len - icmp4_ipl_in_bytes;
-	max_iel = IPXL_ICMP4_ERROR_MAX_LEN -
+	max_iel = IPXLAT_ICMP4_ERROR_MAX_LEN -
 		  (outer_hdrs_len + ICMP_EXT_ORIG_DGRAM_MIN_LEN);
 
 	if (unlikely(ie_forbidden)) {
@@ -403,14 +403,14 @@ static int ipxl_64_squeeze_icmp_ext(struct sk_buff *skb, unsigned int icmp6_ipl,
 		icmp4_iel_out = 0;
 	} else if (unlikely(icmp4_iel_in > max_iel)) {
 		pkt_len_cap = min_t(unsigned int, skb->len - icmp4_iel_in,
-				    IPXL_ICMP4_ERROR_MAX_LEN);
+				    IPXLAT_ICMP4_ERROR_MAX_LEN);
 		icmp4_ipl_out_bytes = pkt_len_cap - outer_hdrs_len;
 		out_pad = 0;
 		icmp4_iel_out = 0;
 		icmp4_ipl_out = 0;
 	} else {
 		pkt_len_cap =
-			min_t(unsigned int, skb->len, IPXL_ICMP4_ERROR_MAX_LEN);
+			min_t(unsigned int, skb->len, IPXLAT_ICMP4_ERROR_MAX_LEN);
 		icmp4_ipl_out_bytes =
 			round_down(pkt_len_cap - icmp4_iel_in - outer_hdrs_len,
 				   sizeof(u32));
@@ -431,7 +431,7 @@ static int ipxl_64_squeeze_icmp_ext(struct sk_buff *skb, unsigned int icmp6_ipl,
 			return err;
 	}
 
-	err = ipxl_icmp_relayout(skb, outer_hdrs_len, icmp4_ipl_in_bytes,
+	err = ipxlat_icmp_relayout(skb, outer_hdrs_len, icmp4_ipl_in_bytes,
 				 icmp4_iel_in, icmp4_ipl_out_bytes, out_pad,
 				 icmp4_iel_out);
 	if (unlikely(err))
@@ -443,8 +443,8 @@ finalize:
 		ic4->un.reserved[1] = icmp4_ipl_out;
 	}
 
-	if (unlikely(skb->len > IPXL_ICMP4_ERROR_MAX_LEN)) {
-		err = pskb_trim(skb, IPXL_ICMP4_ERROR_MAX_LEN);
+	if (unlikely(skb->len > IPXLAT_ICMP4_ERROR_MAX_LEN)) {
+		err = pskb_trim(skb, IPXLAT_ICMP4_ERROR_MAX_LEN);
 		if (unlikely(err))
 			return err;
 	}
@@ -463,8 +463,8 @@ finalize:
 }
 
 /**
- * ipxl_64_icmp_error - translate ICMPv6 error payload to ICMPv4 error form
- * @ipxl: translator private context
+ * ipxlat_64_icmp_error - translate ICMPv6 error payload to ICMPv4 error form
+ * @ipxlat: translator private context
  * @skb: packet carrying outer ICMPv6 error
  *
  * Rewrites the quoted inner datagram in place, maps type/code/fields and
@@ -472,9 +472,9 @@ finalize:
  *
  * Return: 0 on success, negative errno on translation failure.
  */
-static int ipxl_64_icmp_error(struct ipxl_priv *ipxl, struct sk_buff *skb)
+static int ipxlat_64_icmp_error(struct ipxlat_priv *ipxlat, struct sk_buff *skb)
 {
-	const struct ipxl_cb *cb = ipxl_skb_cb(skb);
+	const struct ipxlat_cb *cb = ipxlat_skb_cb(skb);
 	const struct icmp6hdr ic6 = *icmp6_hdr(skb);
 	unsigned int icmp6_ipl;
 	int inner_delta, err;
@@ -487,18 +487,18 @@ static int ipxl_64_icmp_error(struct ipxl_priv *ipxl, struct sk_buff *skb)
 	}
 
 	/* translate quoted inner packet headers */
-	err = ipxl_64_icmp_inner(ipxl, skb, &inner_delta);
+	err = ipxlat_64_icmp_inner(ipxlat, skb, &inner_delta);
 	if (unlikely(err))
 		return err;
 
 	/* build outer ICMPv4 error header after inner relayout */
 	ic4 = (struct icmphdr *)(skb->data + skb_transport_offset(skb));
-	err = ipxl_64_build_icmp4_errhdr(ipxl, skb, &ic6, ic4, &ie_forbidden);
+	err = ipxlat_64_build_icmp4_errhdr(ipxlat, skb, &ic6, ic4, &ie_forbidden);
 	if (unlikely(err))
 		return err;
 
 	icmp6_ipl = ic6.icmp6_datagram_len << 3;
-	err = ipxl_64_squeeze_icmp_ext(skb, icmp6_ipl, inner_delta,
+	err = ipxlat_64_squeeze_icmp_ext(skb, icmp6_ipl, inner_delta,
 				       ie_forbidden);
 	if (unlikely(err))
 		return err;
@@ -506,16 +506,16 @@ static int ipxl_64_icmp_error(struct ipxl_priv *ipxl, struct sk_buff *skb)
 	/* recompute whole ICMPv4 checksum after error-path relayout */
 	ic4->checksum = 0;
 	ic4->checksum = csum_fold(skb_checksum(skb, skb_transport_offset(skb),
-					       ipxl_skb_datagram_len(skb), 0));
+					       ipxlat_skb_datagram_len(skb), 0));
 	skb->ip_summed = CHECKSUM_NONE;
 	return 0;
 }
 
-int ipxl_64_icmp(struct ipxl_priv *ipxl, struct sk_buff *skb,
+int ipxlat_64_icmp(struct ipxlat_priv *ipxlat, struct sk_buff *skb,
 		 const struct ipv6hdr *in6)
 {
-	if (unlikely(ipxl_skb_cb(skb)->is_icmp_err))
-		return ipxl_64_icmp_error(ipxl, skb);
+	if (unlikely(ipxlat_skb_cb(skb)->is_icmp_err))
+		return ipxlat_64_icmp_error(ipxlat, skb);
 
-	return ipxl_64_icmp_info(skb, in6);
+	return ipxlat_64_icmp_info(skb, in6);
 }

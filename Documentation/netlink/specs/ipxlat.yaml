@@ -8,7 +8,7 @@
 #         Ralf Lici <ralf@mandelbit.com>
 #
 ---
-name: ipxl
+name: ipxlat
 protocol: genetlink
 doc: Netlink protocol to control IPXLAT (SIIT) network devices.
 
@@ -70,8 +70,8 @@ operations:
       attribute-set: dev
       doc: Get / dump configuration of ipxlat devices.
       do:
-        pre: ipxl-nl-pre-doit
-        post: ipxl-nl-post-doit
+        pre: ipxlat-nl-pre-doit
+        post: ipxlat-nl-post-doit
         request:
           attributes:
             - ifindex
@@ -95,5 +95,5 @@ operations:
             - config
         reply:
           attributes: []
-        pre:  ipxl-nl-pre-doit
-        post: ipxl-nl-post-doit
+        pre:  ipxlat-nl-pre-doit
+        post: ipxlat-nl-post-doit

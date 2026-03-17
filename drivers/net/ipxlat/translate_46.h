@@ -20,63 +20,63 @@ struct frag_hdr;
 struct sk_buff;
 
 /**
- * ipxl_46_map_proto_to_nexthdr - map IPv4 L4 protocol to IPv6 nexthdr
+ * ipxlat_46_map_proto_to_nexthdr - map IPv4 L4 protocol to IPv6 nexthdr
  * @protocol: IPv4 L4 protocol
  *
  * Return: IPv6 next-header value corresponding to @protocol.
  */
-u8 ipxl_46_map_proto_to_nexthdr(u8 protocol);
+u8 ipxlat_46_map_proto_to_nexthdr(u8 protocol);
 
 /**
- * ipxl_46_build_frag_hdr - build IPv6 Fragment Header from IPv4 fragment info
+ * ipxlat_46_build_frag_hdr - build IPv6 Fragment Header from IPv4 fragment info
  * @fh6: output IPv6 fragment header
  * @hdr4: source IPv4 header
  * @l4_proto: original IPv4 L4 protocol
  */
-void ipxl_46_build_frag_hdr(struct frag_hdr *fh6, const struct iphdr *hdr4,
+void ipxlat_46_build_frag_hdr(struct frag_hdr *fh6, const struct iphdr *hdr4,
 			    u8 l4_proto);
 
 /**
- * ipxl_46_build_l3 - build translated outer IPv6 header from IPv4 metadata
+ * ipxlat_46_build_l3 - build translated outer IPv6 header from IPv4 metadata
  * @iph6: output IPv6 header
  * @iph4: source IPv4 header
  * @payload_len: IPv6 payload length
  * @nexthdr: resulting IPv6 nexthdr
  * @hop_limit: resulting IPv6 hop limit
  */
-void ipxl_46_build_l3(struct ipv6hdr *iph6, const struct iphdr *iph4,
+void ipxlat_46_build_l3(struct ipv6hdr *iph6, const struct iphdr *iph4,
 		      unsigned int payload_len, u8 nexthdr, u8 hop_limit);
 
 /**
- * ipxl_46_lookup_pmtu6 - lookup post-translation IPv6 PMTU for a 4->6 packet
- * @ipxl: translator private context
+ * ipxlat_46_lookup_pmtu6 - lookup post-translation IPv6 PMTU for a 4->6 packet
+ * @ipxlat: translator private context
  * @skb: packet being translated
  * @in4: source IPv4 header snapshot
  *
  * Return: effective PMTU clamped against translator device MTU.
  */
-unsigned int ipxl_46_lookup_pmtu6(struct ipxl_priv *ipxl,
+unsigned int ipxlat_46_lookup_pmtu6(struct ipxlat_priv *ipxlat,
 				  const struct sk_buff *skb,
 				  const struct iphdr *in4);
 
 /**
- * ipxl_46_plan_prefrag - decide whether IPv4 packet must be pre-fragmented
- * @ipxl: translator private context
+ * ipxlat_46_plan_prefrag - decide whether IPv4 packet must be pre-fragmented
+ * @ipxlat: translator private context
  * @skb: packet being translated
  *
  * Sets cb->frag_max_size when pre-fragmentation is required.
  *
  * Return: 0 on success, negative errno on policy/validation failure.
  */
-int ipxl_46_plan_prefrag(struct ipxl_priv *ipxl, struct sk_buff *skb);
+int ipxlat_46_plan_prefrag(struct ipxlat_priv *ipxlat, struct sk_buff *skb);
 
 /**
- * ipxl_46_translate - translate outer packet from IPv4 to IPv6 in place
- * @ipxl: translator private context
+ * ipxlat_46_translate - translate outer packet from IPv4 to IPv6 in place
+ * @ipxlat: translator private context
  * @skb: packet to translate
  *
  * Return: 0 on success, negative errno on translation failure.
  */
-int ipxl_46_translate(struct ipxl_priv *ipxl, struct sk_buff *skb);
+int ipxlat_46_translate(struct ipxlat_priv *ipxlat, struct sk_buff *skb);
 
 #endif /* _NET_IPXLAT_TRANSLATE_46_H_ */

@@ -22,9 +22,9 @@
  * fields in the modified skb.
  *
  * This helper only guards against underflow (< 0). Relative ordering checks
- * are done by ipxl_cb_offsets_valid.
+ * are done by ipxlat_cb_offsets_valid.
  */
-int ipxl_cb_rebase_offsets(struct ipxl_cb *cb, int delta)
+int ipxlat_cb_rebase_offsets(struct ipxlat_cb *cb, int delta)
 {
 	int off;
 
@@ -63,11 +63,11 @@ int ipxl_cb_rebase_offsets(struct ipxl_cb *cb, int delta)
 #ifdef CONFIG_DEBUG_NET
 /* Verify ordering/range relations between cached skb cb offsets.
  *
- * Unlike ipxl_cb_rebase_offsets, this checks structural invariants:
+ * Unlike ipxlat_cb_rebase_offsets, this checks structural invariants:
  * l4 <= payload, inner_l3 >= payload, inner_l3 <= inner_l4, and fragment
  * header (when present) located inside inner L3 area before inner L4.
  */
-bool ipxl_cb_offsets_valid(const struct ipxl_cb *cb)
+bool ipxlat_cb_offsets_valid(const struct ipxlat_cb *cb)
 {
 	if (unlikely(cb->payload_off < cb->l4_off))
 		return false;
@@ -89,7 +89,7 @@ bool ipxl_cb_offsets_valid(const struct ipxl_cb *cb)
 }
 #endif
 
-static bool ipxl_v4_validate_addr(__be32 addr4)
+static bool ipxlat_v4_validate_addr(__be32 addr4)
 {
 	return !(ipv4_is_zeronet(addr4) || ipv4_is_loopback(addr4) ||
 		 ipv4_is_multicast(addr4) || ipv4_is_lbcast(addr4));
@@ -100,7 +100,7 @@ static bool ipxl_v4_validate_addr(__be32 addr4)
  * We intentionally treat malformed option encoding as invalid input and
  * drop early instead of continuing translation.
  */
-static int ipxl_v4_srr_check(struct sk_buff *skb, const struct iphdr *hdr)
+static int ipxlat_v4_srr_check(struct sk_buff *skb, const struct iphdr *hdr)
 {
 	const u8 *opt, *end;
 	u8 type, len, ptr;
@@ -140,7 +140,7 @@ static int ipxl_v4_srr_check(struct sk_buff *skb, const struct iphdr *hdr)
 			if (unlikely(ptr > len - 3))
 				return -EINVAL;
 
-			ipxl_mark_icmp_drop(skb, ICMP_DEST_UNREACH,
+			ipxlat_mark_icmp_drop(skb, ICMP_DEST_UNREACH,
 					    ICMP_SR_FAILED, 0);
 			return -EINVAL;
 		}
@@ -151,7 +151,7 @@ static int ipxl_v4_srr_check(struct sk_buff *skb, const struct iphdr *hdr)
 	return 0;
 }
 
-static int ipxl_v4_pull_l3(struct sk_buff *skb, unsigned int l3_offset,
+static int ipxlat_v4_pull_l3(struct sk_buff *skb, unsigned int l3_offset,
 			   bool inner)
 {
 	const struct iphdr *iph;
@@ -180,7 +180,7 @@ static int ipxl_v4_pull_l3(struct sk_buff *skb, unsigned int l3_offset,
 	return l3_len;
 }
 
-static int ipxl_v4_pull_l4(struct sk_buff *skb, unsigned int l4_offset,
+static int ipxlat_v4_pull_l4(struct sk_buff *skb, unsigned int l4_offset,
 			   u8 l4_proto, bool *is_icmp_err)
 {
 	struct icmphdr *icmp;
@@ -220,16 +220,16 @@ static int ipxl_v4_pull_l4(struct sk_buff *skb, unsigned int l4_offset,
 	}
 }
 
-static int ipxl_v4_pull_icmp_inner(struct sk_buff *skb,
+static int ipxlat_v4_pull_icmp_inner(struct sk_buff *skb,
 				   unsigned int inner_l3_off)
 {
-	struct ipxl_cb *cb = ipxl_skb_cb(skb);
+	struct ipxlat_cb *cb = ipxlat_skb_cb(skb);
 	const struct iphdr *inner_l3_hdr;
 	unsigned int inner_l4_off;
 	int inner_l3_len, err;
 	bool is_icmp_err;
 
-	inner_l3_len = ipxl_v4_pull_l3(skb, inner_l3_off, true);
+	inner_l3_len = ipxlat_v4_pull_l3(skb, inner_l3_off, true);
 	if (unlikely(inner_l3_len < 0))
 		return inner_l3_len;
 	inner_l3_hdr = (const struct iphdr *)(skb->data + inner_l3_off);
@@ -240,10 +240,10 @@ static int ipxl_v4_pull_icmp_inner(struct sk_buff *skb,
 	cb->inner_l3_hdr_len = inner_l3_len;
 	cb->inner_l4_offset = inner_l4_off;
 
-	if (unlikely(!ipxl_is_first_frag4(inner_l3_hdr)))
+	if (unlikely(!ipxlat_is_first_frag4(inner_l3_hdr)))
 		return 0;
 
-	err = ipxl_v4_pull_l4(skb, inner_l4_off, inner_l3_hdr->protocol,
+	err = ipxlat_v4_pull_l4(skb, inner_l4_off, inner_l3_hdr->protocol,
 			      &is_icmp_err);
 	if (unlikely(err < 0))
 		return err;
@@ -253,27 +253,27 @@ static int ipxl_v4_pull_icmp_inner(struct sk_buff *skb,
 	return 0;
 }
 
-static int ipxl_v4_pull_hdrs(struct sk_buff *skb)
+static int ipxlat_v4_pull_hdrs(struct sk_buff *skb)
 {
 	const unsigned int l3_off = skb_network_offset(skb);
-	struct ipxl_cb *cb = ipxl_skb_cb(skb);
+	struct ipxlat_cb *cb = ipxlat_skb_cb(skb);
 	int err, l3_len, l4_len = 0;
 	const struct iphdr *l3_hdr;
 
 	/* parse IPv4 header and get its full length including options */
-	l3_len = ipxl_v4_pull_l3(skb, l3_off, false);
+	l3_len = ipxlat_v4_pull_l3(skb, l3_off, false);
 	if (unlikely(l3_len < 0))
 		return l3_len;
 	l3_hdr = ip_hdr(skb);
 
-	if (unlikely(!ipxl_v4_validate_addr(l3_hdr->daddr)))
+	if (unlikely(!ipxlat_v4_validate_addr(l3_hdr->daddr)))
 		return -EINVAL;
 
 	/* RFC 7915 Section 4.1 */
-	if (unlikely(ipxl_v4_srr_check(skb, l3_hdr)))
+	if (unlikely(ipxlat_v4_srr_check(skb, l3_hdr)))
 		return -EINVAL;
 	if (unlikely(l3_hdr->ttl <= 1)) {
-		ipxl_mark_icmp_drop(skb, ICMP_TIME_EXCEEDED, ICMP_EXC_TTL, 0);
+		ipxlat_mark_icmp_drop(skb, ICMP_TIME_EXCEEDED, ICMP_EXC_TTL, 0);
 		return -EINVAL;
 	}
 
@@ -292,13 +292,13 @@ static int ipxl_v4_pull_hdrs(struct sk_buff *skb)
 	cb->is_icmp_err = false;
 
 	/* only non fragmented packets or first fragments have transport hdrs */
-	if (unlikely(!ipxl_is_first_frag4(l3_hdr))) {
-		if (unlikely(!ipxl_v4_validate_addr(l3_hdr->saddr)))
+	if (unlikely(!ipxlat_is_first_frag4(l3_hdr))) {
+		if (unlikely(!ipxlat_v4_validate_addr(l3_hdr->saddr)))
 			return -EINVAL;
 		return 0;
 	}
 
-	l4_len = ipxl_v4_pull_l4(skb, cb->l4_off, l3_hdr->protocol,
+	l4_len = ipxlat_v4_pull_l4(skb, cb->l4_off, l3_hdr->protocol,
 				 &cb->is_icmp_err);
 	if (unlikely(l4_len < 0))
 		return l4_len;
@@ -306,14 +306,14 @@ static int ipxl_v4_pull_hdrs(struct sk_buff *skb)
 	/* RFC 7915 Section 4.1:
 	 * Illegal IPv4 sources are accepted only for ICMPv4 error translation.
 	 */
-	if (unlikely(!ipxl_v4_validate_addr(l3_hdr->saddr) && !cb->is_icmp_err))
+	if (unlikely(!ipxlat_v4_validate_addr(l3_hdr->saddr) && !cb->is_icmp_err))
 		return -EINVAL;
 
 	cb->payload_off = cb->l4_off + l4_len;
 
 	if (unlikely(cb->is_icmp_err)) {
 		/* validate the quoted packet in an ICMP error */
-		err = ipxl_v4_pull_icmp_inner(skb, cb->payload_off);
+		err = ipxlat_v4_pull_icmp_inner(skb, cb->payload_off);
 		if (unlikely(err))
 			return err;
 	}
@@ -321,7 +321,7 @@ static int ipxl_v4_pull_hdrs(struct sk_buff *skb)
 	return 0;
 }
 
-static int ipxl_v4_validate_icmp_csum(const struct sk_buff *skb)
+static int ipxlat_v4_validate_icmp_csum(const struct sk_buff *skb)
 {
 	__sum16 csum;
 
@@ -333,23 +333,23 @@ static int ipxl_v4_validate_icmp_csum(const struct sk_buff *skb)
 	 * Internet checksum to validate it
 	 */
 	csum = csum_fold(skb_checksum(skb, skb_transport_offset(skb),
-				      ipxl_skb_datagram_len(skb), 0));
+				      ipxlat_skb_datagram_len(skb), 0));
 	return unlikely(csum) ? -EINVAL : 0;
 }
 
 /**
- * ipxl_v4_validate_skb - validate IPv4 input and fill parser metadata in cb
- * @ipxl: translator private context
+ * ipxlat_v4_validate_skb - validate IPv4 input and fill parser metadata in cb
+ * @ipxlat: translator private context
  * @skb: packet to validate
  *
  * Ensures required headers are present/consistent and stores parsed offsets
- * into %struct ipxl_cb for the translation path.
+ * into %struct ipxlat_cb for the translation path.
  *
  * Return: 0 on success, negative errno on validation failure.
  */
-int ipxl_v4_validate_skb(struct ipxl_priv *ipxl, struct sk_buff *skb)
+int ipxlat_v4_validate_skb(struct ipxlat_priv *ipxlat, struct sk_buff *skb)
 {
-	struct ipxl_cb *cb = ipxl_skb_cb(skb);
+	struct ipxlat_cb *cb = ipxlat_skb_cb(skb);
 	struct iphdr *l3_hdr;
 	struct udphdr *udph;
 	int err;
@@ -357,7 +357,7 @@ int ipxl_v4_validate_skb(struct ipxl_priv *ipxl, struct sk_buff *skb)
 	if (unlikely(skb_shared(skb)))
 		return -EINVAL;
 
-	err = ipxl_v4_pull_hdrs(skb);
+	err = ipxlat_v4_pull_hdrs(skb);
 	if (unlikely(err))
 		return err;
 
@@ -373,13 +373,13 @@ int ipxl_v4_validate_skb(struct ipxl_priv *ipxl, struct sk_buff *skb)
 		 * Validate here so a corrupted ICMPv4 error is not converted
 		 * into a translated packet with a valid checksum.
 		 */
-		return ipxl_v4_validate_icmp_csum(skb);
+		return ipxlat_v4_validate_icmp_csum(skb);
 	}
 
 	l3_hdr = ip_hdr(skb);
 	if (likely(cb->l4_proto != IPPROTO_UDP))
 		return 0;
-	if (unlikely(!ipxl_is_first_frag4(l3_hdr)))
+	if (unlikely(!ipxlat_is_first_frag4(l3_hdr)))
 		return 0;
 
 	udph = udp_hdr(skb);
@@ -392,7 +392,7 @@ int ipxl_v4_validate_skb(struct ipxl_priv *ipxl, struct sk_buff *skb)
 	 * reliably translate it.
 	 */
 	if (unlikely(ip_is_fragment(l3_hdr))) {
-		ipxl_mark_icmp_drop(skb, ICMP_DEST_UNREACH, ICMP_PKT_FILTERED,
+		ipxlat_mark_icmp_drop(skb, ICMP_DEST_UNREACH, ICMP_PKT_FILTERED,
 				    0);
 		return -EINVAL;
 	}
@@ -406,13 +406,13 @@ int ipxl_v4_validate_skb(struct ipxl_priv *ipxl, struct sk_buff *skb)
 	return 0;
 }
 
-static bool ipxl_v6_validate_saddr(const struct in6_addr *addr6)
+static bool ipxlat_v6_validate_saddr(const struct in6_addr *addr6)
 {
 	return !(ipv6_addr_any(addr6) || ipv6_addr_loopback(addr6) ||
 		 ipv6_addr_is_multicast(addr6));
 }
 
-static int ipxl_v6_pull_l4(struct sk_buff *skb, unsigned int l4_offset,
+static int ipxlat_v6_pull_l4(struct sk_buff *skb, unsigned int l4_offset,
 			   u8 l4_proto, bool *is_icmp_err)
 {
 	struct icmp6hdr *icmp;
@@ -448,7 +448,7 @@ static int ipxl_v6_pull_l4(struct sk_buff *skb, unsigned int l4_offset,
 /* Basic IPv6 header walk: parse only the packet starting at l3_offset.
  * It does not inspect quoted inner packets carried by ICMP errors.
  */
-static int ipxl_v6_walk_hdrs(struct sk_buff *skb, unsigned int l3_offset,
+static int ipxlat_v6_walk_hdrs(struct sk_buff *skb, unsigned int l3_offset,
 			     u8 *l4_proto, unsigned int *fhdr_offset,
 			     unsigned int *l4_offset, bool *has_l4)
 {
@@ -480,7 +480,7 @@ static int ipxl_v6_walk_hdrs(struct sk_buff *skb, unsigned int l3_offset,
 
 		/* remember Fragment Header offset for downstream logic */
 		*fhdr_offset = frag_hdr_off;
-		first_frag = ipxl_is_first_frag6(frag);
+		first_frag = ipxlat_is_first_frag6(frag);
 
 		/* ipv6 forbids chaining FHs */
 		if (unlikely(frag->nexthdr == NEXTHDR_FRAGMENT))
@@ -520,7 +520,7 @@ static int ipxl_v6_walk_hdrs(struct sk_buff *skb, unsigned int l3_offset,
  * must not be translated. We detect it by asking ipv6_find_hdr not to
  * skip RH, then emit ICMPv6 Parameter Problem pointing to segments_left.
  */
-static int ipxl_v6_check_rh(struct sk_buff *skb)
+static int ipxlat_v6_check_rh(struct sk_buff *skb)
 {
 	unsigned int rh_off, pointer;
 	int flags, nexthdr;
@@ -534,11 +534,11 @@ static int ipxl_v6_check_rh(struct sk_buff *skb)
 		return 0;
 
 	pointer = rh_off + offsetof(struct ipv6_rt_hdr, segments_left);
-	ipxl_mark_icmp_drop(skb, ICMPV6_PARAMPROB, ICMPV6_HDR_FIELD, pointer);
+	ipxlat_mark_icmp_drop(skb, ICMPV6_PARAMPROB, ICMPV6_HDR_FIELD, pointer);
 	return -EINVAL;
 }
 
-static int ipxl_v6_pull_outer_l3(struct sk_buff *skb)
+static int ipxlat_v6_pull_outer_l3(struct sk_buff *skb)
 {
 	const unsigned int l3_off = skb_network_offset(skb);
 	struct ipv6hdr *l3_hdr;
@@ -551,11 +551,11 @@ static int ipxl_v6_pull_outer_l3(struct sk_buff *skb)
 	if (unlikely(l3_hdr->version != 6 ||
 		     skb->len != sizeof(*l3_hdr) +
 					 be16_to_cpu(l3_hdr->payload_len) ||
-		     !ipxl_v6_validate_saddr(&l3_hdr->saddr)))
+		     !ipxlat_v6_validate_saddr(&l3_hdr->saddr)))
 		return -EINVAL;
 
 	if (unlikely(l3_hdr->hop_limit <= 1)) {
-		ipxl_mark_icmp_drop(skb, ICMPV6_TIME_EXCEED,
+		ipxlat_mark_icmp_drop(skb, ICMPV6_TIME_EXCEED,
 				    ICMPV6_EXC_HOPLIMIT, 0);
 		return -EINVAL;
 	}
@@ -563,11 +563,11 @@ static int ipxl_v6_pull_outer_l3(struct sk_buff *skb)
 	return 0;
 }
 
-static int ipxl_v6_pull_icmp_inner(struct sk_buff *skb,
+static int ipxlat_v6_pull_icmp_inner(struct sk_buff *skb,
 				   unsigned int outer_payload_off)
 {
 	unsigned int inner_fhdr_off, inner_l4_off;
-	struct ipxl_cb *cb = ipxl_skb_cb(skb);
+	struct ipxlat_cb *cb = ipxlat_skb_cb(skb);
 	struct ipv6hdr *inner_ip6;
 	bool has_l4, is_icmp_err;
 	u8 inner_l4_proto;
@@ -581,7 +581,7 @@ static int ipxl_v6_pull_icmp_inner(struct sk_buff *skb,
 	if (unlikely(inner_ip6->version != 6))
 		return -EINVAL;
 
-	err = ipxl_v6_walk_hdrs(skb, outer_payload_off, &inner_l4_proto,
+	err = ipxlat_v6_walk_hdrs(skb, outer_payload_off, &inner_l4_proto,
 				&inner_fhdr_off, &inner_l4_off, &has_l4);
 	if (unlikely(err))
 		return err;
@@ -592,7 +592,7 @@ static int ipxl_v6_pull_icmp_inner(struct sk_buff *skb,
 	cb->inner_l4_proto = inner_l4_proto;
 
 	if (likely(has_l4)) {
-		err = ipxl_v6_pull_l4(skb, inner_l4_off, inner_l4_proto,
+		err = ipxlat_v6_pull_l4(skb, inner_l4_off, inner_l4_proto,
 				      &is_icmp_err);
 		if (unlikely(err < 0))
 			return err;
@@ -603,29 +603,29 @@ static int ipxl_v6_pull_icmp_inner(struct sk_buff *skb,
 	return 0;
 }
 
-static int ipxl_v6_pull_hdrs(struct sk_buff *skb)
+static int ipxlat_v6_pull_hdrs(struct sk_buff *skb)
 {
 	const unsigned int l3_off = skb_network_offset(skb);
 	unsigned int fragh_off, l4_off, payload_off;
-	struct ipxl_cb *cb = ipxl_skb_cb(skb);
+	struct ipxlat_cb *cb = ipxlat_skb_cb(skb);
 	int l3_len, l4_len, err;
 	struct frag_hdr *frag;
 	bool has_l4;
 	u8 l4_proto;
 
 	/* parse IPv6 base header and perform basic structural checks */
-	err = ipxl_v6_pull_outer_l3(skb);
+	err = ipxlat_v6_pull_outer_l3(skb);
 	if (unlikely(err))
 		return err;
 
 	/* walk extension/fragment headers and locate the transport header */
-	err = ipxl_v6_walk_hdrs(skb, l3_off, &l4_proto, &fragh_off, &l4_off,
+	err = ipxlat_v6_walk_hdrs(skb, l3_off, &l4_proto, &fragh_off, &l4_off,
 				&has_l4);
 	/* -EPROTONOSUPPORT means packet layout is syntactically valid but
 	 * unsupported by our RFC 7915 path
 	 */
 	if (unlikely(err == -EPROTONOSUPPORT)) {
-		ipxl_mark_icmp_drop(skb, ICMPV6_DEST_UNREACH,
+		ipxlat_mark_icmp_drop(skb, ICMPV6_DEST_UNREACH,
 				    ICMPV6_ADM_PROHIBITED, 0);
 		return -EINVAL;
 	}
@@ -636,7 +636,7 @@ static int ipxl_v6_pull_hdrs(struct sk_buff *skb)
 	payload_off = l4_off;
 
 	if (likely(has_l4)) {
-		l4_len = ipxl_v6_pull_l4(skb, l4_off, l4_proto,
+		l4_len = ipxlat_v6_pull_l4(skb, l4_off, l4_proto,
 					 &cb->is_icmp_err);
 		if (unlikely(l4_len < 0))
 			return l4_len;
@@ -644,7 +644,7 @@ static int ipxl_v6_pull_hdrs(struct sk_buff *skb)
 	}
 
 	/* RFC 7915 Section 5.1 */
-	err = ipxl_v6_check_rh(skb);
+	err = ipxlat_v6_check_rh(skb);
 	if (unlikely(err))
 		return err;
 
@@ -661,14 +661,14 @@ static int ipxl_v6_pull_hdrs(struct sk_buff *skb)
 				return -EINVAL;
 
 			frag = (struct frag_hdr *)(skb->data + fragh_off);
-			if (unlikely(ipxl_get_frag6_offset(frag) ||
+			if (unlikely(ipxlat_get_frag6_offset(frag) ||
 				     (be16_to_cpu(frag->frag_off) & IP6_MF)))
 				return -EINVAL;
 		}
 
 		if (unlikely(cb->is_icmp_err)) {
 			/* validate the quoted packet in an ICMP error */
-			err = ipxl_v6_pull_icmp_inner(skb, payload_off);
+			err = ipxlat_v6_pull_icmp_inner(skb, payload_off);
 			if (unlikely(err))
 				return err;
 		}
@@ -683,7 +683,7 @@ static int ipxl_v6_pull_hdrs(struct sk_buff *skb)
 	return 0;
 }
 
-static int ipxl_v6_validate_icmp_csum(const struct sk_buff *skb)
+static int ipxlat_v6_validate_icmp_csum(const struct sk_buff *skb)
 {
 	struct ipv6hdr *iph6;
 	unsigned int len;
@@ -693,7 +693,7 @@ static int ipxl_v6_validate_icmp_csum(const struct sk_buff *skb)
 		return 0;
 
 	iph6 = ipv6_hdr(skb);
-	len = ipxl_skb_datagram_len(skb);
+	len = ipxlat_skb_datagram_len(skb);
 	csum = csum_ipv6_magic(&iph6->saddr, &iph6->daddr, len, NEXTHDR_ICMP,
 			       skb_checksum(skb, skb_transport_offset(skb), len,
 					    0));
@@ -702,23 +702,23 @@ static int ipxl_v6_validate_icmp_csum(const struct sk_buff *skb)
 }
 
 /**
- * ipxl_v6_validate_skb - validate IPv6 input and fill parser metadata in cb
+ * ipxlat_v6_validate_skb - validate IPv6 input and fill parser metadata in cb
  * @skb: packet to validate
  *
  * Ensures required headers are present/consistent and stores parsed offsets
- * into %struct ipxl_cb for the translation path.
+ * into %struct ipxlat_cb for the translation path.
  *
  * Return: 0 on success, negative errno on validation failure.
  */
-int ipxl_v6_validate_skb(struct sk_buff *skb)
+int ipxlat_v6_validate_skb(struct sk_buff *skb)
 {
-	struct ipxl_cb *cb = ipxl_skb_cb(skb);
+	struct ipxlat_cb *cb = ipxlat_skb_cb(skb);
 	int err;
 
 	if (unlikely(skb_shared(skb)))
 		return -EINVAL;
 
-	err = ipxl_v6_pull_hdrs(skb);
+	err = ipxlat_v6_pull_hdrs(skb);
 	if (unlikely(err))
 		return err;
 
@@ -733,7 +733,7 @@ int ipxl_v6_validate_skb(struct sk_buff *skb)
 		/* The translated ICMPv4 checksum is recomputed from scratch,
 		 * so reject bad ICMPv6 error checksums before conversion.
 		 */
-		err = ipxl_v6_validate_icmp_csum(skb);
+		err = ipxlat_v6_validate_icmp_csum(skb);
 		if (unlikely(err))
 			return err;
 	}

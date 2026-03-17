@@ -26,7 +26,7 @@ MODULE_LICENSE("GPL");
 
 #define DRV_NAME "ipxlat"
 
-static const struct ipxl_cfg ipxl_cfg_defaults = {
+static const struct ipxlat_cfg ipxlat_cfg_defaults = {
 	/* 64:ff9b::/96 */
 	.xlat_prefix6.addr.s6_addr32[0] = htonl(0x0064ff9b),
 	.xlat_prefix6.len = 96,
@@ -34,49 +34,49 @@ static const struct ipxl_cfg ipxl_cfg_defaults = {
 	.lowest_ipv6_mtu = 1280,
 };
 
-static int ipxl_dev_init(struct net_device *dev)
+static int ipxlat_dev_init(struct net_device *dev)
 {
-	struct ipxl_priv *ipxl = netdev_priv(dev);
+	struct ipxlat_priv *ipxlat = netdev_priv(dev);
 	int err;
 
-	ipxl->dev = dev;
+	ipxlat->dev = dev;
 	/* seed per-device config from module defaults */
-	ipxl->cfg = ipxl_cfg_defaults;
-	mutex_init(&ipxl->cfg_lock);
+	ipxlat->cfg = ipxlat_cfg_defaults;
+	mutex_init(&ipxlat->cfg_lock);
 
-	err = gro_cells_init(&ipxl->gro_cells, dev);
+	err = gro_cells_init(&ipxlat->gro_cells, dev);
 	if (unlikely(err))
 		return err;
 
 	return 0;
 }
 
-static void ipxl_dev_uninit(struct net_device *dev)
+static void ipxlat_dev_uninit(struct net_device *dev)
 {
-	struct ipxl_priv *ipxl = netdev_priv(dev);
+	struct ipxlat_priv *ipxlat = netdev_priv(dev);
 
-	gro_cells_destroy(&ipxl->gro_cells);
+	gro_cells_destroy(&ipxlat->gro_cells);
 }
 
-static int ipxl_start_xmit(struct sk_buff *skb, struct net_device *dev)
+static int ipxlat_start_xmit(struct sk_buff *skb, struct net_device *dev)
 {
-	struct ipxl_priv *ipxl = netdev_priv(dev);
+	struct ipxlat_priv *ipxlat = netdev_priv(dev);
 
-	ipxl_process_skb(ipxl, skb, true);
+	ipxlat_process_skb(ipxlat, skb, true);
 	return NETDEV_TX_OK;
 }
 
-static const struct net_device_ops ipxl_netdev_ops = {
-	.ndo_init = ipxl_dev_init,
-	.ndo_uninit = ipxl_dev_uninit,
-	.ndo_start_xmit = ipxl_start_xmit,
+static const struct net_device_ops ipxlat_netdev_ops = {
+	.ndo_init = ipxlat_dev_init,
+	.ndo_uninit = ipxlat_dev_uninit,
+	.ndo_start_xmit = ipxlat_start_xmit,
 };
 
-static const struct device_type ipxl_type = {
+static const struct device_type ipxlat_type = {
 	.name = DRV_NAME,
 };
 
-static void ipxl_setup(struct net_device *dev)
+static void ipxlat_setup(struct net_device *dev)
 {
 	const netdev_features_t feat = NETIF_F_SG | NETIF_F_FRAGLIST |
 				       NETIF_F_HW_CSUM | NETIF_F_HIGHDMA |
@@ -93,7 +93,7 @@ static void ipxl_setup(struct net_device *dev)
 	dev->hw_features |= feat;
 	dev->hw_enc_features |= feat;
 
-	dev->netdev_ops = &ipxl_netdev_ops;
+	dev->netdev_ops = &ipxlat_netdev_ops;
 	dev->needs_free_netdev = true;
 	dev->pcpu_stat_type = NETDEV_PCPU_STAT_DSTATS;
 	dev->max_mtu =
@@ -106,45 +106,45 @@ static void ipxl_setup(struct net_device *dev)
 	 */
 	netif_keep_dst(dev);
 
-	SET_NETDEV_DEVTYPE(dev, &ipxl_type);
+	SET_NETDEV_DEVTYPE(dev, &ipxlat_type);
 }
 
-static struct rtnl_link_ops ipxl_link_ops = {
+static struct rtnl_link_ops ipxlat_link_ops = {
 	.kind = DRV_NAME,
-	.priv_size = sizeof(struct ipxl_priv),
-	.setup = ipxl_setup,
+	.priv_size = sizeof(struct ipxlat_priv),
+	.setup = ipxlat_setup,
 };
 
-bool ipxl_dev_is_valid(const struct net_device *dev)
+bool ipxlat_dev_is_valid(const struct net_device *dev)
 {
-	return dev->rtnl_link_ops == &ipxl_link_ops;
+	return dev->rtnl_link_ops == &ipxlat_link_ops;
 }
 
-static int __init ipxl_init(void)
+static int __init ipxlat_init(void)
 {
 	int err;
 
-	err = rtnl_link_register(&ipxl_link_ops);
+	err = rtnl_link_register(&ipxlat_link_ops);
 	if (err) {
 		pr_err("ipxlat: failed to register rtnl link ops: %d\n", err);
 		return err;
 	}
 
-	err = ipxl_nl_register();
+	err = ipxlat_nl_register();
 	if (err) {
 		pr_err("ipxlat: failed to register netlink family: %d\n", err);
-		rtnl_link_unregister(&ipxl_link_ops);
+		rtnl_link_unregister(&ipxlat_link_ops);
 		return err;
 	}
 
 	return 0;
 }
 
-static void __exit ipxl_exit(void)
+static void __exit ipxlat_exit(void)
 {
-	ipxl_nl_unregister();
-	rtnl_link_unregister(&ipxl_link_ops);
+	ipxlat_nl_unregister();
+	rtnl_link_unregister(&ipxlat_link_ops);
 }
 
-module_init(ipxl_init);
-module_exit(ipxl_exit);
+module_init(ipxlat_init);
+module_exit(ipxlat_exit);

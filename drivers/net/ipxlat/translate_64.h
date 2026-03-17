@@ -19,7 +19,7 @@ struct iphdr;
 struct ipv6hdr;
 
 /**
- * ipxl_64_build_l3 - build translated outer IPv4 header from IPv6 metadata
+ * ipxlat_64_build_l3 - build translated outer IPv4 header from IPv6 metadata
  * @iph4: output IPv4 header
  * @iph6: source IPv6 header
  * @tot_len: resulting IPv4 total length
@@ -30,25 +30,25 @@ struct ipv6hdr;
  * @ttl: resulting IPv4 TTL
  * @id: resulting IPv4 identification field
  */
-void ipxl_64_build_l3(struct iphdr *iph4, const struct ipv6hdr *iph6,
+void ipxlat_64_build_l3(struct iphdr *iph4, const struct ipv6hdr *iph6,
 		      unsigned int tot_len, __be16 frag_off, u8 protocol,
 		      __be32 saddr, __be32 daddr, u8 ttl, __be16 id);
 
 /**
- * ipxl_64_translate - translate outer packet from IPv6 to IPv4 in place
- * @ipxl: translator private context
+ * ipxlat_64_translate - translate outer packet from IPv6 to IPv4 in place
+ * @ipxlat: translator private context
  * @skb: packet to translate
  *
  * Return: 0 on success, negative errno on translation failure.
  */
-int ipxl_64_translate(struct ipxl_priv *ipxl, struct sk_buff *skb);
+int ipxlat_64_translate(struct ipxlat_priv *ipxlat, struct sk_buff *skb);
 
 /**
- * ipxl_64_map_nexthdr_proto - map IPv6 nexthdr to IPv4 L4 protocol
+ * ipxlat_64_map_nexthdr_proto - map IPv6 nexthdr to IPv4 L4 protocol
  * @nexthdr: IPv6 next-header value
  *
  * Return: IPv4 protocol value corresponding to @nexthdr.
  */
-u8 ipxl_64_map_nexthdr_proto(u8 nexthdr);
+u8 ipxlat_64_map_nexthdr_proto(u8 nexthdr);
 
 #endif /* _NET_IPXLAT_TRANSLATE_64_H_ */

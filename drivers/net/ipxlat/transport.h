@@ -17,12 +17,12 @@
 #include <linux/ipv6.h>
 
 /**
- * ipxl_l4_min_len - minimum transport header size for protocol
+ * ipxlat_l4_min_len - minimum transport header size for protocol
  * @protocol: transport protocol identifier
  *
  * Return: minimum header length for @protocol, or 0 if unsupported.
  */
-static inline unsigned int ipxl_l4_min_len(u8 protocol)
+static inline unsigned int ipxlat_l4_min_len(u8 protocol)
 {
 	switch (protocol) {
 	case IPPROTO_TCP:
@@ -37,16 +37,16 @@ static inline unsigned int ipxl_l4_min_len(u8 protocol)
 }
 
 /**
- * ipxl_set_partial_csum - program CHECKSUM_PARTIAL metadata on skb
+ * ipxlat_set_partial_csum - program CHECKSUM_PARTIAL metadata on skb
  * @skb: packet with transport checksum field
  * @csum_offset: offset of checksum field within transport header
  *
  * Return: 0 on success, negative errno on invalid skb state.
  */
-int ipxl_set_partial_csum(struct sk_buff *skb, u16 csum_offset);
+int ipxlat_set_partial_csum(struct sk_buff *skb, u16 csum_offset);
 
 /**
- * ipxl_l4_csum_ipv6 - compute full L4 checksum with IPv6 pseudo-header
+ * ipxlat_l4_csum_ipv6 - compute full L4 checksum with IPv6 pseudo-header
  * @saddr: IPv6 source address
  * @daddr: IPv6 destination address
  * @skb: packet buffer
@@ -56,13 +56,13 @@ int ipxl_set_partial_csum(struct sk_buff *skb, u16 csum_offset);
  *
  * Return: finalized transport checksum for IPv6 packet context.
  */
-__sum16 ipxl_l4_csum_ipv6(const struct in6_addr *saddr,
+__sum16 ipxlat_l4_csum_ipv6(const struct in6_addr *saddr,
 			  const struct in6_addr *daddr,
 			  const struct sk_buff *skb, unsigned int l4_off,
 			  unsigned int l4_len, u8 proto);
 
 /**
- * ipxl_icmp_relayout - resize quoted ICMP payload/extensions in place
+ * ipxlat_icmp_relayout - resize quoted ICMP payload/extensions in place
  * @skb: packet buffer
  * @outer_len: offset to quoted datagram start
  * @in_ipl: input datagram payload length
@@ -75,13 +75,13 @@ __sum16 ipxl_l4_csum_ipv6(const struct in6_addr *saddr,
  *
  * Return: 0 on success, negative errno on resize/memory failures.
  */
-int ipxl_icmp_relayout(struct sk_buff *skb, unsigned int outer_len,
+int ipxlat_icmp_relayout(struct sk_buff *skb, unsigned int outer_len,
 		       unsigned int in_ipl, unsigned int in_iel,
 		       unsigned int out_ipl, unsigned int out_pad,
 		       unsigned int out_iel);
 
 /**
- * ipxl_finalize_offload - normalize checksum/GSO metadata after translation
+ * ipxlat_finalize_offload - normalize checksum/GSO metadata after translation
  * @skb: translated packet
  * @l4_proto: resulting transport protocol
  * @is_fragment: resulting packet is fragmented
@@ -94,27 +94,27 @@ int ipxl_icmp_relayout(struct sk_buff *skb, unsigned int outer_len,
  * Return: 0 on success, negative errno on unsupported/offload-incompatible
  * input.
  */
-int ipxl_finalize_offload(struct sk_buff *skb, u8 l4_proto, bool is_fragment,
+int ipxlat_finalize_offload(struct sk_buff *skb, u8 l4_proto, bool is_fragment,
 			  u32 gso_from, u32 gso_to);
 
 /* outer transport translation helpers (packet L3 already translated) */
-int ipxl_46_outer_tcp(struct sk_buff *skb, const struct iphdr *in4);
-int ipxl_46_outer_udp(struct sk_buff *skb, const struct iphdr *in4);
+int ipxlat_46_outer_tcp(struct sk_buff *skb, const struct iphdr *in4);
+int ipxlat_46_outer_udp(struct sk_buff *skb, const struct iphdr *in4);
 
 /* quoted-inner transport translation helpers for ICMP error payloads */
-int ipxl_46_inner_tcp(struct sk_buff *skb, const struct iphdr *in4,
+int ipxlat_46_inner_tcp(struct sk_buff *skb, const struct iphdr *in4,
 		      const struct ipv6hdr *iph6, struct tcphdr *tcp_new);
-int ipxl_46_inner_udp(struct sk_buff *skb, const struct iphdr *in4,
+int ipxlat_46_inner_udp(struct sk_buff *skb, const struct iphdr *in4,
 		      const struct ipv6hdr *iph6, struct udphdr *udp_new);
 
 /* outer transport translation helpers (packet L3 already translated) */
-int ipxl_64_outer_tcp(struct sk_buff *skb, const struct ipv6hdr *in6);
-int ipxl_64_outer_udp(struct sk_buff *skb, const struct ipv6hdr *in6);
+int ipxlat_64_outer_tcp(struct sk_buff *skb, const struct ipv6hdr *in6);
+int ipxlat_64_outer_udp(struct sk_buff *skb, const struct ipv6hdr *in6);
 
 /* quoted-inner transport translation helpers for ICMP error payloads */
-int ipxl_64_inner_tcp(struct sk_buff *skb, const struct ipv6hdr *in6,
+int ipxlat_64_inner_tcp(struct sk_buff *skb, const struct ipv6hdr *in6,
 		      const struct iphdr *out4, struct tcphdr *tcp_new);
-int ipxl_64_inner_udp(struct sk_buff *skb, const struct ipv6hdr *in6,
+int ipxlat_64_inner_udp(struct sk_buff *skb, const struct ipv6hdr *in6,
 		      const struct iphdr *out4, struct udphdr *udp_new);
 
 #endif /* _NET_IPXLAT_TRANSPORT_H_ */
