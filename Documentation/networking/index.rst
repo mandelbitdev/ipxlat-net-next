@@ -69,6 +69,7 @@ Contents:
    ipv6
    ipvlan
    ipvs-sysctl
+   ipxlat
    kcm
    l2tp
    lapb-module

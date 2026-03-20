@@ -57,14 +57,15 @@ receiver except in special cases.
 
 Differences in IP layer semantic concerns are handled using several
 different strategies, here we'll only give a high-level summary in the
-areas of most friction:
-  Fragmentation approach, Path MTU Discovery (PMTUD), IP Options and Extension
-  Headers.
+areas of most friction: Fragmentation approach, Path MTU Discovery (PMTUD),
+IP Options and Extension Headers.
 
 **Fragmentation Approach** (v4: on-path vs v6: end-to-end) is smoothed over by:
- | 4->6: Fragmenting (DF=0) IPv4 packets when needed. See "lowest-ipv6-mtu".
- | 6->4: Using on-path frag. down the line for v4 pkts smaller than 1260.
- Details are tedious, check RFC-SIIT_.
+
+- 4->6: Fragmenting (DF=0) IPv4 packets when needed. See "lowest-ipv6-mtu".
+- 6->4: Using on-path frag. down the line for v4 pkts smaller than 1260.
+
+Details are tedious, check RFC-SIIT_.
 
 **PMTUD** is maintained by recalculating advised MTU values in ICMP
 PKT_TOO_BIG and FRAG_NEEDED messages as they're being translated. Taking
