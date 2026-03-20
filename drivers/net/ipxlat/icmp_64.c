@@ -11,6 +11,7 @@
  *		Ralf Lici <ralf@mandelbit.com>
  */
 
+#include <net/ip6_checksum.h>
 #include <net/route.h>
 
 #include "address.h"

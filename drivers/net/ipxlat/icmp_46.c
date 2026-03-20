@@ -11,6 +11,8 @@
  *		Ralf Lici <ralf@mandelbit.com>
  */
 
+#include <net/ip6_checksum.h>
+
 #include "address.h"
 #include "icmp.h"
 #include "packet.h"
@@ -328,8 +330,8 @@ static int ipxlat_46_icmp_inner(struct ipxlat_priv *ipxlat,
 				struct sk_buff *skb, struct iphdr *inner4,
 				int *inner_delta)
 {
-	unsigned int inner_l3_len, inner_l3_off, inner_l4_off, old_prefix,
-		new_prefix, inner_tot_len, inner_l3_payload, inner_l4_payload;
+	unsigned int inner_l3_len, inner_l3_off, old_prefix, new_prefix,
+		inner_tot_len, inner_l3_payload, inner_l4_payload;
 	const unsigned int outer_l3_len = skb_transport_offset(skb);
 	const struct ipxlat_cb *cb = ipxlat_skb_cb(skb);
 	struct ipv6hdr outer_ip6_copy, *inner_ip6;
@@ -338,7 +340,6 @@ static int ipxlat_46_icmp_inner(struct ipxlat_priv *ipxlat,
 	bool has_inner_frag;
 
 	inner_l3_off = cb->inner_l3_offset;
-	inner_l4_off = cb->inner_l4_offset;
 
 	/* inner header alignment is not guaranteed */
 	memcpy(inner4, skb->data + inner_l3_off, sizeof(*inner4));

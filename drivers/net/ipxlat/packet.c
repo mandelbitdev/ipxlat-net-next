@@ -13,6 +13,8 @@
 
 #include <linux/icmp.h>
 
+#include <net/ip6_checksum.h>
+
 #include "dispatch.h"
 #include "packet.h"
 
@@ -457,14 +459,8 @@ static int ipxlat_v6_walk_hdrs(struct sk_buff *skb, unsigned int l3_offset,
 {
 	unsigned int frag_hdr_off, l4hdr_off;
 	struct frag_hdr *frag;
-	struct ipv6hdr *ip6;
 	bool first_frag;
 	int err;
-
-	/* cannot use default getter because this function is used both for
-	 * outer and inner packets
-	 */
-	ip6 = (struct ipv6hdr *)(skb->data + l3_offset);
 
 	/* if present, locate Fragment Header first because it affects
 	 * whether transport headers are available
