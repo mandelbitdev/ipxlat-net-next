@@ -120,7 +120,7 @@ static int ipxlat_nl_send_dev(struct sk_buff *skb, struct ipxlat_priv *ipxlat,
 	hdr = genlmsg_put(skb, portid, seq, &ipxlat_nl_family, flags,
 			  IPXLAT_CMD_DEV_GET);
 	if (!hdr)
-		return -ENOBUFS;
+		return -EMSGSIZE;
 
 	if (nla_put_u32(skb, IPXLAT_A_DEV_IFINDEX, ipxlat->dev->ifindex))
 		goto err;
@@ -128,10 +128,6 @@ static int ipxlat_nl_send_dev(struct sk_buff *skb, struct ipxlat_priv *ipxlat,
 	if (!net_eq(src_net, dev_net(ipxlat->dev))) {
 		id = peernet2id_alloc(src_net, dev_net(ipxlat->dev),
 				      GFP_ATOMIC);
-		if (id < 0) {
-			ret = id;
-			goto err;
-		}
 		if (nla_put_s32(skb, IPXLAT_A_DEV_NETNSID, id))
 			goto err;
 	}

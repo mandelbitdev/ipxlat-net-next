@@ -199,17 +199,20 @@ ipxlat_64_compute_icmp_info_csum(const struct ipv6hdr *in6,
 
 static int ipxlat_64_icmp_info(struct sk_buff *skb, const struct ipv6hdr *in6)
 {
-	struct icmp6hdr ic6_copy, *ic6;
-	struct icmphdr *ic4;
+	struct icmp6hdr *ic6 = icmp6_hdr(skb);
+	struct icmphdr *ic4 = icmp_hdr(skb);
+	struct icmp6hdr ic6_copy = *ic6;
 	int err;
 
-	ic6 = icmp6_hdr(skb);
-	ic6_copy = *ic6;
-
-	ic4 = (struct icmphdr *)(skb->data + skb_transport_offset(skb));
 	err = ipxlat_64_map_icmp_info_type_code(&ic6_copy, ic4);
 	if (unlikely(err))
 		return err;
+
+	if (skb->ip_summed == CHECKSUM_PARTIAL) {
+		ic4->checksum = ~csum_unfold(ic4->checksum);
+		return ipxlat_set_partial_csum(skb, offsetof(struct icmphdr,
+							     checksum));
+	}
 
 	ic4->checksum =
 		ipxlat_64_compute_icmp_info_csum(in6, &ic6_copy, ic4,

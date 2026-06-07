@@ -50,9 +50,11 @@ static __sum16 ipxlat_46_update_csum(__sum16 csum16,
 
 	/* replace pseudohdr and L4 header contributions, payload unchanged */
 	csum = csum_sub(csum, ipxlat_pseudohdr4_csum(in_ip4));
-	csum = csum_sub(csum, csum_partial(in_l4_hdr, l4_hdr_len, 0));
 	csum = csum_add(csum, ipxlat_pseudohdr6_csum(out_ip6));
-	csum = csum_add(csum, csum_partial(out_l4_hdr, l4_hdr_len, 0));
+	if (l4_hdr_len) {
+		csum = csum_sub(csum, csum_partial(in_l4_hdr, l4_hdr_len, 0));
+		csum = csum_add(csum, csum_partial(out_l4_hdr, l4_hdr_len, 0));
+	}
 	return csum_fold(csum);
 }
 
@@ -210,7 +212,6 @@ int ipxlat_46_outer_tcp(struct sk_buff *skb, const struct iphdr *in4)
 {
 	const struct ipv6hdr *iph6 = ipv6_hdr(skb);
 	struct tcphdr *tcp_new = tcp_hdr(skb);
-	struct tcphdr tcp_old;
 	__sum16 csum16;
 
 	/* CHECKSUM_PARTIAL keeps a pseudohdr seed in check, not a final
@@ -224,14 +225,9 @@ int ipxlat_46_outer_tcp(struct sk_buff *skb, const struct iphdr *in4)
 					       offsetof(struct tcphdr, check));
 	}
 
-	/* zeroing check in old/new headers avoids double-accounting it */
+	/* only IP addresses are modified; L4 fields are left untouched */
 	csum16 = tcp_new->check;
-	tcp_old = *tcp_new;
-	tcp_old.check = 0;
-	tcp_new->check = 0;
-	tcp_new->check = ipxlat_46_update_csum(csum16, in4,
-					       &tcp_old, iph6, tcp_new,
-					       sizeof(*tcp_new));
+	tcp_new->check = ipxlat_46_update_csum(csum16, in4, NULL, iph6, 0, 0);
 	skb->ip_summed = CHECKSUM_NONE;
 	return 0;
 }
@@ -245,7 +241,8 @@ int ipxlat_46_outer_udp(struct sk_buff *skb, const struct iphdr *in4)
 	__sum16 csum16;
 
 	/* outer path enforces UDP zero-checksum policy in validation */
-	if (skb->ip_summed == CHECKSUM_PARTIAL && likely(udp_new->check != 0)) {
+	if (skb->ip_summed == CHECKSUM_PARTIAL &&
+	    (likely(udp_new->check != 0) || skb_is_gso(skb))) {
 		udp_new->check = ~udp_v6_check(ipxlat_skb_datagram_len(skb),
 					       &iph6->saddr, &iph6->daddr, 0);
 		return ipxlat_set_partial_csum(skb,
@@ -261,11 +258,7 @@ int ipxlat_46_outer_udp(struct sk_buff *skb, const struct iphdr *in4)
 			ipxlat_l4_csum_ipv6(&iph6->saddr, &iph6->daddr, skb,
 					    skb_transport_offset(skb),
 					    cb->udp_zero_csum_len, IPPROTO_UDP);
-		/* 0x0000 on wire means "no checksum"; preserve computed zero */
-		if (udp_new->check == 0)
-			udp_new->check = CSUM_MANGLED_0;
-		skb->ip_summed = CHECKSUM_NONE;
-		return 0;
+		goto out;
 	}
 
 	csum16 = udp_new->check;
@@ -275,22 +268,12 @@ int ipxlat_46_outer_udp(struct sk_buff *skb, const struct iphdr *in4)
 	udp_new->check = ipxlat_46_update_csum(csum16, in4,
 					       &udp_old, iph6, udp_new,
 					       sizeof(*udp_new));
+
+out:
+	/* 0x0000 on wire means "no checksum"; preserve computed zero */
+	if (udp_new->check == 0)
+		udp_new->check = CSUM_MANGLED_0;
 	skb->ip_summed = CHECKSUM_NONE;
-	return 0;
-}
-
-int ipxlat_46_inner_tcp(struct sk_buff *skb, const struct iphdr *in4,
-			const struct ipv6hdr *iph6, struct tcphdr *tcp_new)
-{
-	struct tcphdr tcp_old;
-	__sum16 csum16;
-
-	csum16 = tcp_new->check;
-	tcp_old = *tcp_new;
-	tcp_old.check = 0;
-	tcp_new->check = 0;
-	tcp_new->check = ipxlat_46_update_csum(csum16, in4, &tcp_old, iph6,
-					       tcp_new, sizeof(*tcp_new));
 	return 0;
 }
 
@@ -309,6 +292,9 @@ int ipxlat_46_inner_udp(struct sk_buff *skb, const struct iphdr *in4,
 	udp_new->check = 0;
 	udp_new->check = ipxlat_46_update_csum(csum16, in4, &udp_old, iph6,
 					       udp_new, sizeof(*udp_new));
+	/* 0x0000 on wire means "no checksum"; preserve computed zero */
+	if (udp_new->check == 0)
+		udp_new->check = CSUM_MANGLED_0;
 	return 0;
 }
 

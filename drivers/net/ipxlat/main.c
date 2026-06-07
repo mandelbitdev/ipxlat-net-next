@@ -20,6 +20,7 @@
 #include "main.h"
 #include "netlink.h"
 
+MODULE_ALIAS_RTNL_LINK("ipxlat");
 MODULE_AUTHOR("Alberto Leiva Popper <ydahhrk@gmail.com>");
 MODULE_AUTHOR("Antonio Quartulli <antonio@mandelbit.com>");
 MODULE_AUTHOR("Daniel Gröber <dxld@darkboxed.org>");

@@ -104,8 +104,6 @@ int ipxlat_46_outer_tcp(struct sk_buff *skb, const struct iphdr *in4);
 int ipxlat_46_outer_udp(struct sk_buff *skb, const struct iphdr *in4);
 
 /* quoted-inner transport translation helpers for ICMP error payloads */
-int ipxlat_46_inner_tcp(struct sk_buff *skb, const struct iphdr *in4,
-			const struct ipv6hdr *iph6, struct tcphdr *tcp_new);
 int ipxlat_46_inner_udp(struct sk_buff *skb, const struct iphdr *in4,
 			const struct ipv6hdr *iph6, struct udphdr *udp_new);
 

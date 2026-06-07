@@ -15,6 +15,7 @@
 #define _NET_IPXLAT_PACKET_H_
 
 #include <net/ip.h>
+#include <net/ipv6.h>
 
 #include "ipxlpriv.h"
 

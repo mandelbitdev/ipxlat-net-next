@@ -156,6 +156,9 @@ static int ipxlat_46_frag_output(struct net *net, struct sock *sk,
 {
 	struct ipxlat_priv *ipxlat = netdev_priv(skb->dev);
 
+	/* drop the synthetic dst as it can leak into ICMP error routing */
+	skb_dst_drop(skb);
+
 	return ipxlat_process_skb(ipxlat, skb, false);
 }
 
@@ -231,7 +234,7 @@ int ipxlat_process_skb(struct ipxlat_priv *ipxlat, struct sk_buff *skb,
 		/* prefrag is allowed only once to avoid unbounded loops */
 		if (unlikely(!allow_pre_frag)) {
 			err = -ELOOP;
-			goto drop_free;
+			goto drop;
 		}
 
 		/* fragment first, then reinject each fragment through
@@ -242,21 +245,20 @@ int ipxlat_process_skb(struct ipxlat_priv *ipxlat, struct sk_buff *skb,
 		/* fragment path already consumed/freed skb */
 		skb = NULL;
 		if (unlikely(err))
-			goto drop_free;
+			goto drop;
 		return 0;
 	case IPXLAT_ACT_ICMP_ERR:
-		dev_dstats_tx_dropped(ipxlat->dev);
 		ipxlat_emit_icmp_error(ipxlat, skb);
-		consume_skb(skb);
-		return 0;
+		err = 0;
+		fallthrough;
 	case IPXLAT_ACT_DROP:
-		goto drop_free;
+		goto drop;
 	default:
 		DEBUG_NET_WARN_ON_ONCE(1);
-		goto drop_free;
+		goto drop;
 	}
 
-drop_free:
+drop:
 	dev_dstats_tx_dropped(ipxlat->dev);
 	kfree_skb(skb);
 	return err;

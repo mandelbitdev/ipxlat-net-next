@@ -89,8 +89,8 @@ static __be16 ipxlat_64_build_frag_off(const struct sk_buff *skb,
 int ipxlat_64_translate(struct ipxlat_priv *ipxlat, struct sk_buff *skb)
 {
 	unsigned int min_l4_len, old_l3_len, new_l3_len;
+	const struct ipv6hdr outer6 = *ipv6_hdr(skb);
 	struct ipxlat_cb *cb = ipxlat_skb_cb(skb);
-	struct ipv6hdr outer6 = *ipv6_hdr(skb);
 	bool is_icmp_err, has_frag, first_frag;
 	u8 in_l4_proto, out_l4_proto;
 	struct frag_hdr frag_copy;
@@ -126,6 +126,10 @@ int ipxlat_64_translate(struct ipxlat_priv *ipxlat, struct sk_buff *skb)
 				      is_icmp_err, &saddr, &daddr);
 	if (unlikely(err))
 		return err;
+
+	/* make sure the skb is writable */
+	if (unlikely(skb_cow_head(skb, max_t(int, 0, l3_delta))))
+		return -ENOMEM;
 
 	/* replace outer IPv6 hdr with IPv4 hdr in-place */
 	skb_pull(skb, old_l3_len);

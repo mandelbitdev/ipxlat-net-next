@@ -309,19 +309,16 @@ static int ipxlat_46_icmp_inner_l4(struct sk_buff *skb,
 				   const struct iphdr *inner4,
 				   const struct ipv6hdr *inner6)
 {
-	struct tcphdr *tcp;
 	struct udphdr *udp;
 
 	switch (inner4->protocol) {
-	case IPPROTO_TCP:
-		tcp = (struct tcphdr *)(skb->data + inner_l4_off);
-		return ipxlat_46_inner_tcp(skb, inner4, inner6, tcp);
 	case IPPROTO_UDP:
 		udp = (struct udphdr *)(skb->data + inner_l4_off);
 		return ipxlat_46_inner_udp(skb, inner4, inner6, udp);
 	case IPPROTO_ICMP:
 		return ipxlat_46_icmp_info_inner(skb, inner_l4_off, inner6);
 	default:
+		/* TCP: cannot update the checksum using a partial header */
 		return 0;
 	}
 }
@@ -399,7 +396,10 @@ static int ipxlat_46_icmp_inner(struct ipxlat_priv *ipxlat,
 	if (unlikely(!ipxlat_is_first_frag4(inner4)))
 		return 0;
 
-	inner_l4_payload = new_prefix + ipxlat_l4_min_len(inner4->protocol);
+	/* According to RFC 792, IPv4 ICMP errors are only strictly required to
+	 * quote the first 8 bytes of the original datagram's transport payload
+	 */
+	inner_l4_payload = new_prefix + 8;
 	if (unlikely(skb_ensure_writable(skb, inner_l4_payload)))
 		return -ENOMEM;
 

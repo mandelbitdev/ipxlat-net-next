@@ -430,18 +430,25 @@ static int ipxlat_v6_pull_l4(struct sk_buff *skb, unsigned int l4_offset,
 	case NEXTHDR_TCP:
 		if (unlikely(!pskb_may_pull(skb, l4_offset + sizeof(*tcp))))
 			return -EINVAL;
+
 		tcp = (struct tcphdr *)(skb->data + l4_offset);
+		if (unlikely(tcp->doff < 5))
+			return -EINVAL;
+
 		return __tcp_hdrlen(tcp);
 	case NEXTHDR_UDP:
 		if (unlikely(!pskb_may_pull(skb, l4_offset + sizeof(*udp))))
 			return -EINVAL;
+
 		udp = (struct udphdr *)(skb->data + l4_offset);
 		if (unlikely(ntohs(udp->len) < sizeof(*udp)))
 			return -EINVAL;
+
 		return sizeof(struct udphdr);
 	case NEXTHDR_ICMP:
 		if (unlikely(!pskb_may_pull(skb, l4_offset + sizeof(*icmp))))
 			return -EINVAL;
+
 		icmp = (struct icmp6hdr *)(skb->data + l4_offset);
 		*is_icmp_err = icmpv6_is_err(icmp->icmp6_type);
 		return sizeof(struct icmp6hdr);
@@ -550,7 +557,7 @@ static int ipxlat_v6_pull_outer_l3(struct sk_buff *skb)
 
 	/* translator does not support jumbograms; payload_len must match skb */
 	if (unlikely(l3_hdr->version != 6 ||
-		     skb->len != sizeof(*l3_hdr) +
+		     skb->len != skb_network_offset(skb) + sizeof(*l3_hdr) +
 					 be16_to_cpu(l3_hdr->payload_len) ||
 		     !ipxlat_v6_validate_saddr(&l3_hdr->saddr)))
 		return -EINVAL;
